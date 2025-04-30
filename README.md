@@ -12,14 +12,13 @@ Library for parsing MPEG-DASH (.mpd) and HLS (.m3u8) manifests. Made with the pu
 npm i dasha
 ```
 
-## Quick start
+## Usage
 
 ```js
 import fs from 'node:fs/promises';
 import { parse } from 'dasha';
 
-const url =
-  'https://dash.akamaized.net/dash264/TestCases/1a/sony/SNE_DASH_SD_CASE1A_REVISED.mpd';
+const url = 'https://dash.akamaized.net/dash264/TestCases/1a/sony/SNE_DASH_SD_CASE1A_REVISED.mpd';
 const body = await fetch(url).then((res) => res.text());
 const manifest = await parse(body, url);
 
@@ -30,3 +29,11 @@ for (const track of manifest.tracks.all) {
   }
 }
 ```
+
+## Credits
+
+This project is heavily influenced by the robust implementation found in [N_m3u8DL-RE](https://github.com/nilaoda/N_m3u8DL-RE). Special thanks to the open-source community and contributors who make projects like this possible.
+
+## Licenses
+
+This project is licensed under the [MIT License](LICENSE).
