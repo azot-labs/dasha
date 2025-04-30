@@ -6,12 +6,12 @@
     "dist"
   ],
   "scripts": {
-    "test": "npm run lint && npm run types && node --test",
+    "test": "vitest",
     "types": "tsc -p tsconfig.json",
     "format": "prettier --write .",
     "lint": "eslint . && prettier --check .",
     "fix": "eslint . --fix && prettier --write .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsdown dasha.ts --format esm --format cjs",
     "prepublishOnly": "npm run build"
   },

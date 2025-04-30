@@ -18,7 +18,7 @@ export class StreamExtractor {
   #rawFiles: Record<string, string> = {};
 
   constructor(parserConfig?: ParserConfig) {
-    this.#parserConfig = parserConfig || new ParserConfig();
+    this.#parserConfig = parserConfig ?? new ParserConfig();
   }
 
   get extractorType(): ExtractorType {

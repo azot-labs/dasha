@@ -3,7 +3,7 @@ import { EncryptMethod } from '../shared/encrypt-method';
 export class ParserConfig {
   url: string = '';
   originalUrl: string = '';
-  baseUrl: string = '';
+  baseUrl?: string;
   customParserArgs: Record<string, string> = {};
   headers: Record<string, string> = {};
   contentProcessors: any[] = [];
