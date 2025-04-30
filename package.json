@@ -68,15 +68,7 @@
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.8",
-    "eme-encryption-scheme-polyfill": "^2.2.1",
-    "jsdom": "^26.1.0",
-    "m3u8-parser": "^7.2.0",
-    "shaka-player": "^4.14.9",
-    "temporal-polyfill": "^0.3.0",
-    "xgplayer": "^3.0.21",
-    "xgplayer-dash": "^3.0.21",
-    "xgplayer-hls": "^3.0.21",
-    "xmlhttprequest": "^1.8.0"
+    "temporal-polyfill": "^0.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.1",
