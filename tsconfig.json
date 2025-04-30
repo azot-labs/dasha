@@ -4,8 +4,10 @@
     "moduleResolution": "node",
     "strict": true,
     "baseUrl": ".",
+    "lib": ["ESNext", "DOM"],
     "preserveWatchOutput": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true
   },
-  "include": ["types/**/*.ts"]
+  "include": ["lib/**/*.ts", "types/**/*.ts"]
 }

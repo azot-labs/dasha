@@ -1,25 +1,37 @@
 {
   "name": "dasha",
-  "version": "3.1.5",
+  "version": "4.0.0-alpha.1",
   "description": "Streaming manifest parser",
   "files": [
-    "dasha.js",
-    "lib",
-    "types"
+    "dist"
   ],
   "scripts": {
     "test": "npm run lint && npm run types && node --test",
     "types": "tsc -p tsconfig.json",
+    "format": "prettier --write .",
     "lint": "eslint . && prettier --check .",
     "fix": "eslint . --fix && prettier --write .",
-    "build": "tsup dasha.js --format esm,cjs",
+    "build": "tsdown dasha.ts --format esm --format cjs",
     "prepublishOnly": "npm run build"
   },
-  "main": "dasha.js",
-  "types": "./types/dasha.d.ts",
+  "type": "module",
+  "main": "./dist/dasha.js",
+  "types": "./dist/dasha.d.ts",
+  "exports": {
+    ".": {
+      "require": {
+        "types": "./dist/dasha.d.cts",
+        "default": "./dist/dasha.cjs"
+      },
+      "import": {
+        "types": "./dist/dasha.d.ts",
+        "default": "./dist/dasha.js"
+      }
+    }
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/vitalygashkov/dasha"
+    "url": "https://github.com/streamyx-labs/dasha"
   },
   "keywords": [
     "mpeg",
@@ -27,7 +39,9 @@
     "hls",
     "adaptive",
     "mpd",
+    "mpd-parser",
     "m3u8",
+    "m3u8-parser",
     "manifest",
     "playlist"
   ],
@@ -35,7 +49,7 @@
   "license": "MIT",
   "readmeFilename": "README.md",
   "bugs": {
-    "url": "https://github.com/vitalygashkov/dasha/issues",
+    "url": "https://github.com/streamyx-labs/dasha/issues",
     "email": "vitalygashkov@vk.com"
   },
   "funding": [
@@ -52,17 +66,28 @@
     "node": "20 || 21 || 22"
   },
   "dependencies": {
-    "m3u8-parser": "^7.2.0"
+    "@xmldom/xmldom": "^0.9.8",
+    "eme-encryption-scheme-polyfill": "^2.2.1",
+    "jsdom": "^26.1.0",
+    "m3u8-parser": "^7.2.0",
+    "shaka-player": "^4.14.9",
+    "temporal-polyfill": "^0.3.0",
+    "xgplayer": "^3.0.21",
+    "xgplayer-dash": "^3.0.21",
+    "xgplayer-hls": "^3.0.21",
+    "xmlhttprequest": "^1.8.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.16.0",
-    "@types/node": "^22.10.1",
-    "eslint": "^9.16.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^5.2.1",
-    "globals": "^15.13.0",
-    "prettier": "^3.4.2",
+    "@eslint/js": "^9.25.1",
+    "@types/node": "^22.15.3",
+    "eslint": "^9.25.1",
+    "eslint-config-prettier": "^10.1.2",
+    "eslint-plugin-prettier": "^5.2.6",
+    "globals": "^16.0.0",
+    "prettier": "^3.5.3",
+    "tsdown": "^0.10.2",
     "tsup": "^8.3.5",
-    "typescript": "^5.7.2"
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2"
   }
 }
