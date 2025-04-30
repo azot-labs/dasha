@@ -166,7 +166,7 @@ export class XML {
     function parseNode() {
       pos++;
       const tagName = parseName();
-      const attributes = {};
+      const attributes: Record<string, any> = {};
       let children: any[] = [];
 
       // parsing attributes
@@ -293,7 +293,12 @@ export class XML {
    * @params children{Array} the children of a node
    * @param f{function} the filter method
    */
-  static filter(children, f, dept = 0, path = '') {
+  static filter(
+    children: any[],
+    f: (child: any, i: number, dept: number, path: string) => boolean,
+    dept = 0,
+    path = '',
+  ) {
     var out: any[] = [];
     children.forEach(function (child, i) {
       if (typeof child === 'object' && f(child, i, dept, path)) out.push(child);

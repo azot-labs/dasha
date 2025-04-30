@@ -11,13 +11,14 @@ import { StreamSpec } from './shared/stream-spec';
 import { HlsExtractor } from './extractor/hls-extractor';
 
 export class StreamExtractor {
-  #extractor: Extractor;
+  #extractor!: Extractor;
+  #rawText!: string;
+
   #parserConfig: ParserConfig;
-  #rawText: string;
   #rawFiles: Record<string, string> = {};
 
-  constructor(parserConfig: ParserConfig) {
-    this.#parserConfig = parserConfig;
+  constructor(parserConfig?: ParserConfig) {
+    this.#parserConfig = parserConfig || new ParserConfig();
   }
 
   get extractorType(): ExtractorType {

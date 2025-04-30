@@ -3,8 +3,8 @@ import { EncryptInfo } from './encrypt-info';
 import { ENCRYPT_METHODS } from './encrypt-method';
 
 export class MediaSegment {
-  index: number;
-  duration: number;
+  index: number = NaN;
+  duration: number = NaN;
   title?: string;
   dateTime?: Date;
 

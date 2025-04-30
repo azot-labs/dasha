@@ -18,8 +18,7 @@ test('mpd extraction from text', async () => {
   const url = 'https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p.mpd';
   const text = await readFile('./test/assets/axinom.mpd', 'utf8');
 
-  const parserConfig = new ParserConfig();
-  const streamExtractor = new StreamExtractor(parserConfig);
+  const streamExtractor = new StreamExtractor();
   await streamExtractor.loadSourceFromText(text, url);
   const streams = await streamExtractor.extractStreams();
 
