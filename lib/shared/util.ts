@@ -1,4 +1,4 @@
-import { DASHTags } from './dash-tags';
+import { DASH_TAGS } from './dash-tags';
 
 export const combineUrl = (baseUrl: string, relativeUrl: string) => {
   if (!baseUrl.trim()) return relativeUrl;
@@ -26,7 +26,7 @@ export function replaceVars(text: string, dict: Record<string, any>): string {
   const regex = /\$Number%([0-9]+)d\$/g;
   if (regex.test(result)) {
     result = result.replace(regex, (match, p1) => {
-      return dict[DASHTags.TemplateNumber]?.toString().padStart(parseInt(p1), '0');
+      return dict[DASH_TAGS.TemplateNumber]?.toString().padStart(parseInt(p1), '0');
     });
   }
 

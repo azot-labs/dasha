@@ -97,16 +97,12 @@ export class XML {
               pos += 2;
               var encapsuled = false;
               while (
-                (text.charCodeAt(pos) !== closeBracketCC ||
-                  encapsuled === true) &&
+                (text.charCodeAt(pos) !== closeBracketCC || encapsuled === true) &&
                 text[pos]
               ) {
                 if (text.charCodeAt(pos) === openCornerBracketCC) {
                   encapsuled = true;
-                } else if (
-                  encapsuled === true &&
-                  text.charCodeAt(pos) === closeCornerBracketCC
-                ) {
+                } else if (encapsuled === true && text.charCodeAt(pos) === closeCornerBracketCC) {
                   encapsuled = false;
                 }
                 pos++;
@@ -165,14 +161,7 @@ export class XML {
      *    is parsing a node, including tagName, Attributes and its children,
      * to parse children it uses the parseChildren again, that makes the parsing recursive
      */
-    var NoChildNodes = options.noChildNodes || [
-      'img',
-      'br',
-      'input',
-      'meta',
-      'link',
-      'hr',
-    ];
+    var NoChildNodes = options.noChildNodes || ['img', 'br', 'input', 'meta', 'link', 'hr'];
 
     function parseNode() {
       pos++;

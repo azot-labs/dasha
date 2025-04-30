@@ -9,9 +9,9 @@ import { combineUrl, parseRange, replaceVars } from '../shared/util';
 import { Playlist } from '../shared/playlist';
 import { MediaPart } from '../shared/media-part';
 import { MEDIA_TYPES, MediaType } from '../shared/media-type';
-import { RoleType } from '../shared/role-type';
+import { ROLE_TYPE, RoleType } from '../shared/role-type';
 import { MediaSegment } from '../shared/media-segment';
-import { DASHTags } from '../shared/dash-tags';
+import { DASH_TAGS } from '../shared/dash-tags';
 import { EncryptInfo } from '../shared/encrypt-info';
 
 export class DashExtractor implements Extractor {
@@ -152,12 +152,12 @@ export class DashExtractor implements Extractor {
             const roleValue = role.getAttribute('value');
             const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
             const roleTypeKey = roleValue!.split('-').map(capitalize).join('');
-            const roleType = RoleType[roleTypeKey];
+            const roleType = ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
             streamSpec.role = roleType;
-            if (roleType === RoleType.Subtitle) {
+            if (roleType === ROLE_TYPE.Subtitle) {
               streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
               if (mType?.includes('ttml')) streamSpec.extension = 'ttml';
-            } else if (roleType === RoleType.ForcedSubtitle) {
+            } else if (roleType === ROLE_TYPE.ForcedSubtitle) {
               streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
             }
           }
@@ -256,8 +256,8 @@ export class DashExtractor implements Extractor {
             const segmentTemplateOuter =
               segmentTemplateElementsOuter[0] || segmentTemplateElements[0];
             const varDic: Record<string, any> = {};
-            varDic[DASHTags.TemplateRepresentationID] = streamSpec.groupId;
-            varDic[DASHTags.TemplateBandwidth] = bandwidth;
+            varDic[DASH_TAGS.TemplateRepresentationID] = streamSpec.groupId;
+            varDic[DASH_TAGS.TemplateBandwidth] = bandwidth;
             const presentationTimeOffsetStr =
               segmentTemplate.getAttribute('presentationTimeOffset') ||
               segmentTemplateOuter.getAttribute('presentationTimeOffset') ||
@@ -300,9 +300,9 @@ export class DashExtractor implements Extractor {
                 const _duration = Number(_durationStr);
                 const timescale = Number(timescaleStr);
                 let _repeatCount = Number(_repeatCountStr);
-                varDic[DASHTags.TemplateTime] = currentTime;
-                varDic[DASHTags.TemplateNumber] = segNumber++;
-                const hasTime = mediaTemplate?.includes(DASHTags.TemplateTime);
+                varDic[DASH_TAGS.TemplateTime] = currentTime;
+                varDic[DASH_TAGS.TemplateNumber] = segNumber++;
+                const hasTime = mediaTemplate?.includes(DASH_TAGS.TemplateTime);
                 const media = replaceVars(mediaTemplate!, varDic);
                 const mediaUrl = combineUrl(segBaseUrl, media);
                 const mediaSegment = new MediaSegment();
@@ -319,9 +319,9 @@ export class DashExtractor implements Extractor {
                 for (let i = 0; i < _repeatCount; i++) {
                   currentTime += _duration;
                   const _mediaSegment = new MediaSegment();
-                  varDic[DASHTags.TemplateTime] = currentTime;
-                  varDic[DASHTags.TemplateNumber] = segNumber++;
-                  const _hashTime = mediaTemplate?.includes(DASHTags.TemplateTime);
+                  varDic[DASH_TAGS.TemplateTime] = currentTime;
+                  varDic[DASH_TAGS.TemplateNumber] = segNumber++;
+                  const _hashTime = mediaTemplate?.includes(DASH_TAGS.TemplateTime);
                   const _media = replaceVars(mediaTemplate!, varDic);
                   const _mediaUrl = combineUrl(segBaseUrl, _media);
                   _mediaSegment.url = _mediaUrl;
@@ -355,8 +355,8 @@ export class DashExtractor implements Extractor {
                 index < startNumber + totalNumber;
                 index++, segIndex++
               ) {
-                varDic[DASHTags.TemplateNumber] = index;
-                const hasNumber = mediaTemplate!.includes(DASHTags.TemplateNumber);
+                varDic[DASH_TAGS.TemplateNumber] = index;
+                const hasNumber = mediaTemplate!.includes(DASH_TAGS.TemplateNumber);
                 const media = replaceVars(mediaTemplate!, varDic);
                 const mediaUrl = combineUrl(segBaseUrl, media!);
                 const mediaSegment = new MediaSegment();

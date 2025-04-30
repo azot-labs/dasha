@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { EncryptInfo } from './encrypt-info';
-import { ENCRYPT_METHODS, EncryptMethod } from './encrypt-method';
+import { ENCRYPT_METHODS } from './encrypt-method';
 
 export class MediaSegment {
   index: number;

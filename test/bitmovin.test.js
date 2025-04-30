@@ -4,8 +4,7 @@ const { parse } = require('../dasha');
 const { load } = require('./utils');
 
 test('bitmovin manifest parsing', async () => {
-  const url =
-    'https://cdn.bitmovin.com/content/assets/art-of-motion_drm/mpds/11331.mpd';
+  const url = 'https://cdn.bitmovin.com/content/assets/art-of-motion_drm/mpds/11331.mpd';
   const text = load('bitmovin.mpd');
   const manifest = await parse(text, url);
 

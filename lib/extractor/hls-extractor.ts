@@ -2,7 +2,7 @@ import { MEDIA_TYPES } from './../shared/media-type';
 import { EXTRACTOR_TYPES, type ExtractorType } from 'lib/shared/extractor-type';
 import { Extractor } from './extractor';
 import { ParserConfig } from 'lib/config/parser-config';
-import { HLSTags } from 'lib/shared/hls-tags';
+import { HLS_TAGS } from 'lib/shared/hls-tags';
 import { StreamSpec } from 'lib/shared/stream-spec';
 import { combineUrl, distinctBy, getAttribute, getRange } from 'lib/shared/util';
 import { Playlist } from 'lib/shared/playlist';
@@ -36,7 +36,7 @@ export class HlsExtractor implements Extractor {
 
   preProcessContent(): void {
     this.#m3u8Content = this.#m3u8Content.trim();
-    if (!this.#m3u8Content.startsWith(HLSTags.extM3u)) {
+    if (!this.#m3u8Content.startsWith(HLS_TAGS.extM3u)) {
       throw new Error('Invalid m3u8');
     }
 
@@ -65,7 +65,7 @@ export class HlsExtractor implements Extractor {
     const lines = this.#m3u8Content.split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
-      if (line.startsWith(HLSTags.extXStreamInf)) {
+      if (line.startsWith(HLS_TAGS.extXStreamInf)) {
         streamSpec = new StreamSpec();
         streamSpec.originalUrl = this.parserConfig.originalUrl;
         const bandwidth =
@@ -87,7 +87,7 @@ export class HlsExtractor implements Extractor {
           streamSpec.codecs = streamSpec.codecs.split(',')[0];
         }
         expectPlaylist = true;
-      } else if (line.startsWith(HLSTags.extXMedia)) {
+      } else if (line.startsWith(HLS_TAGS.extXMedia)) {
         streamSpec = new StreamSpec();
         const type = getAttribute(line, 'TYPE').replace('-', '_');
         const mediaType = MEDIA_TYPES[type as keyof typeof MEDIA_TYPES];
@@ -162,7 +162,7 @@ export class HlsExtractor implements Extractor {
     const lines = this.#m3u8Content.split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
-      if (line.startsWith(HLSTags.extXByterange)) {
+      if (line.startsWith(HLS_TAGS.extXByterange)) {
         const p = getAttribute(line);
         const [n, o] = getRange(p);
         segment.expectLength = n;
@@ -177,14 +177,14 @@ export class HlsExtractor implements Extractor {
         }
       } else if (isAd) {
         continue;
-      } else if (line.startsWith(HLSTags.extXTargetDuration)) {
+      } else if (line.startsWith(HLS_TAGS.extXTargetDuration)) {
         playlist.targetDuration = Number(getAttribute(line));
-      } else if (line.startsWith(HLSTags.extXMediaSequence)) {
+      } else if (line.startsWith(HLS_TAGS.extXMediaSequence)) {
         segIndex = Number(getAttribute(line));
         startIndex = segIndex;
-      } else if (line.startsWith(HLSTags.extXProgramDateTime)) {
+      } else if (line.startsWith(HLS_TAGS.extXProgramDateTime)) {
         segment.dateTime = new Date(getAttribute(line));
-      } else if (line.startsWith(HLSTags.extXDiscontinuity)) {
+      } else if (line.startsWith(HLS_TAGS.extXDiscontinuity)) {
         if (hasAd && mediaParts.length) {
           segments = mediaParts.at(-1)?.mediaSegments || [];
           mediaParts.pop();
@@ -194,7 +194,7 @@ export class HlsExtractor implements Extractor {
         if (hasAd && !segments.length) continue;
         mediaParts.push(new MediaPart(segments));
         segments = [];
-      } else if (line.startsWith(HLSTags.extXKey)) {
+      } else if (line.startsWith(HLS_TAGS.extXKey)) {
         const uri = getAttribute(line, 'URI');
         const uriLast = getAttribute(lastKeyLine, 'URI');
         if (uri !== uriLast) {
@@ -204,7 +204,7 @@ export class HlsExtractor implements Extractor {
           currentEncryptInfo.iv = parsedInfo.iv;
         }
         lastKeyLine = line;
-      } else if (line.startsWith(HLSTags.extInf)) {
+      } else if (line.startsWith(HLS_TAGS.extInf)) {
         const tmp = getAttribute(line).split(',');
         segment.duration = Number(tmp[0]);
         segment.index = segIndex;
@@ -215,13 +215,13 @@ export class HlsExtractor implements Extractor {
         }
         expectSegment = true;
         segIndex++;
-      } else if (line.startsWith(HLSTags.extXEndlist)) {
+      } else if (line.startsWith(HLS_TAGS.extXEndlist)) {
         if (segments.length > 0) {
           mediaParts.push(new MediaPart(segments));
         }
         segments = [];
         isEndList = true;
-      } else if (line.startsWith(HLSTags.extXMap)) {
+      } else if (line.startsWith(HLS_TAGS.extXMap)) {
         if (!playlist.mediaInit || hasAd) {
           const mediaSegment = new MediaSegment();
           mediaSegment.url = this.preProcessUrl(
@@ -306,7 +306,7 @@ export class HlsExtractor implements Extractor {
   async extractStreams(rawText: string): Promise<StreamSpec[]> {
     this.#m3u8Content = rawText;
     this.preProcessContent();
-    if (this.#m3u8Content.includes(HLSTags.extXStreamInf)) {
+    if (this.#m3u8Content.includes(HLS_TAGS.extXStreamInf)) {
       console.log('Master m3u8 found');
       return this.#parseMasterList().then((lists) => distinctBy(lists, (list) => list.url));
     }

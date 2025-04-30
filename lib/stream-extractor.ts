@@ -5,7 +5,7 @@ import path from 'node:path';
 import { ExtractorType } from './shared/extractor-type';
 import { ParserConfig } from './config/parser-config';
 import { Extractor } from './extractor/extractor';
-import { HLSTags } from './shared/hls-tags';
+import { HLS_TAGS } from './shared/hls-tags';
 import { DashExtractor } from './extractor/dash-extractor';
 import { StreamSpec } from './shared/stream-spec';
 import { HlsExtractor } from './extractor/hls-extractor';
@@ -56,7 +56,7 @@ export class StreamExtractor {
     if (url) this.#setUrl(url);
     let rawType = 'txt';
     this.#rawText = rawText.trim();
-    if (this.#rawText.startsWith(HLSTags.extM3u)) {
+    if (this.#rawText.startsWith(HLS_TAGS.extM3u)) {
       this.#extractor = new HlsExtractor(this.#parserConfig);
       rawType = 'm3u8';
     } else if (this.#rawText.includes('</MPD>') && this.#rawText.includes('<MPD')) {

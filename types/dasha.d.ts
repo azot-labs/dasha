@@ -1,8 +1,4 @@
-export function parse(
-  text: string,
-  url?: string,
-  fallbackLanguage?: string,
-): Promise<Manifest>;
+export function parse(text: string, url?: string, fallbackLanguage?: string): Promise<Manifest>;
 
 export interface Manifest {
   duration?: number;
@@ -11,46 +7,25 @@ export interface Manifest {
     videos: VideoTrack[];
     audios: AudioTrack[];
     subtitles: SubtitleTrack[];
-    withResolution(resolution: {
-      width?: string;
-      height?: string;
-    }): VideoTrack[];
+    withResolution(resolution: { width?: string; height?: string }): VideoTrack[];
     withVideoCodecs(codecs: VideoCodec[]): VideoTrack[];
     withVideoQuality(quality: number | string): VideoTrack[];
     withAudioCodecs(codecs: AudioCodec[]): AudioTrack[];
-    withAudioLanguages(
-      languages: string[],
-      maxTracksPerLanguage?: number,
-    ): AudioTrack[];
+    withAudioLanguages(languages: string[], maxTracksPerLanguage?: number): AudioTrack[];
     withSubtitleLanguages(languages: string[]): SubtitleTrack[];
   };
 }
 
-export function filterByResolution(resolution: {
-  width?: string;
-  height?: string;
-}): VideoTrack[];
-export function filterByCodecs(
-  tracks: VideoTrack[],
-  codecs: VideoCodec[],
-): VideoTrack[];
-export function filterByCodecs(
-  tracks: AudioTrack[],
-  codecs: AudioCodec[],
-): AudioTrack[];
-export function filterByQuality(
-  tracks: VideoTrack[],
-  quality: number | string,
-): VideoTrack[];
+export function filterByResolution(resolution: { width?: string; height?: string }): VideoTrack[];
+export function filterByCodecs(tracks: VideoTrack[], codecs: VideoCodec[]): VideoTrack[];
+export function filterByCodecs(tracks: AudioTrack[], codecs: AudioCodec[]): AudioTrack[];
+export function filterByQuality(tracks: VideoTrack[], quality: number | string): VideoTrack[];
 export function filterByLanguages(
   tracks: AudioTrack[],
   languages: string[],
   maxTracksPerLanguage?: number,
 ): AudioTrack[];
-export function filterByChannels(
-  tracks: AudioTrack[],
-  channels: number | string,
-): AudioTrack[];
+export function filterByChannels(tracks: AudioTrack[], channels: number | string): AudioTrack[];
 
 export interface Track {
   id: string;
@@ -103,30 +78,13 @@ export interface VideoTrack extends Track {
   bitrate: Bitrate;
   width: number;
   height: number;
-  quality:
-    | '144p'
-    | '240p'
-    | '360p'
-    | '480p'
-    | '720p'
-    | '1080p'
-    | '2160p'
-    | '4320p'
-    | string;
+  quality: '144p' | '240p' | '360p' | '480p' | '720p' | '1080p' | '2160p' | '4320p' | string;
   dynamicRange: DynamicRange;
   fps?: string;
   language?: string;
 }
 
-export type AudioCodec =
-  | 'AAC'
-  | 'DD'
-  | 'DD+'
-  | 'OPUS'
-  | 'VORB'
-  | 'DTS'
-  | 'ALAC'
-  | 'FLAC';
+export type AudioCodec = 'AAC' | 'DD' | 'DD+' | 'OPUS' | 'VORB' | 'DTS' | 'ALAC' | 'FLAC';
 
 export interface AudioTrack extends Track {
   type: 'audio';

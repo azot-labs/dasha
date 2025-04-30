@@ -1,6 +1,6 @@
-export abstract class DASHTags {
-  static TemplateRepresentationID = '$RepresentationID$';
-  static TemplateBandwidth = '$Bandwidth$';
-  static TemplateNumber = '$Number$';
-  static TemplateTime = '$Time$';
-}
+export const DASH_TAGS = {
+  TemplateRepresentationID: '$RepresentationID$',
+  TemplateBandwidth: '$Bandwidth$',
+  TemplateNumber: '$Number$',
+  TemplateTime: '$Time$',
+};
