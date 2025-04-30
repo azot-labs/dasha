@@ -1,6 +1,8 @@
-export abstract class MediaType {
-  static VIDEO = 'video';
-  static AUDIO = 'audio';
-  static SUBTITLES = 'subtitle';
-  static CLOSED_CAPTIONS = 'closed-captions';
-}
+export const MEDIA_TYPES = {
+  VIDEO: 'video',
+  AUDIO: 'audio',
+  SUBTITLES: 'subtitle',
+  CLOSED_CAPTIONS: 'closed-captions',
+} as const;
+
+export type MediaType = (typeof MEDIA_TYPES)[keyof typeof MEDIA_TYPES];

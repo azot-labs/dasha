@@ -8,6 +8,7 @@ import { Extractor } from './extractor/extractor';
 import { HLSTags } from './shared/hls-tags';
 import { DashExtractor } from './extractor/dash-extractor';
 import { StreamSpec } from './shared/stream-spec';
+import { HlsExtractor } from './extractor/hls-extractor';
 
 export class StreamExtractor {
   #extractor: Extractor;
@@ -56,7 +57,7 @@ export class StreamExtractor {
     let rawType = 'txt';
     this.#rawText = rawText.trim();
     if (this.#rawText.startsWith(HLSTags.extM3u)) {
-      // TODO: Implement HLS extractor
+      this.#extractor = new HlsExtractor(this.#parserConfig);
       rawType = 'm3u8';
     } else if (this.#rawText.includes('</MPD>') && this.#rawText.includes('<MPD')) {
       this.#extractor = new DashExtractor(this.#parserConfig);

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { EncryptInfo } from './encrypt-info';
-import { EncryptMethod } from './encrypt-method';
+import { ENCRYPT_METHODS, EncryptMethod } from './encrypt-method';
 
 export class MediaSegment {
   index: number;
@@ -16,10 +16,10 @@ export class MediaSegment {
   }
   expectLength?: number;
 
-  encryptInfo: EncryptInfo;
+  encryptInfo = new EncryptInfo();
 
   get isEncrypted() {
-    return this.encryptInfo.method !== EncryptMethod.NONE;
+    return this.encryptInfo.method !== ENCRYPT_METHODS.NONE;
   }
 
   url = '';

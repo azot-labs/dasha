@@ -1,23 +1,25 @@
 import { Temporal } from 'temporal-polyfill';
 import { DOMParser, Element } from '@xmldom/xmldom';
-import { ExtractorType } from '../shared/extractor-type';
+import { EXTRACTOR_TYPES, ExtractorType } from '../shared/extractor-type';
 import { ParserConfig } from '../config/parser-config';
-import { EncryptMethod } from '../shared/encrypt-method';
+import { ENCRYPT_METHODS, EncryptMethod } from '../shared/encrypt-method';
 import { StreamSpec } from '../shared/stream-spec';
 import { Extractor } from './extractor';
 import { combineUrl, parseRange, replaceVars } from '../shared/util';
 import { Playlist } from '../shared/playlist';
 import { MediaPart } from '../shared/media-part';
-import { MediaType } from '../shared/media-type';
+import { MEDIA_TYPES, MediaType } from '../shared/media-type';
 import { RoleType } from '../shared/role-type';
 import { MediaSegment } from '../shared/media-segment';
 import { DASHTags } from '../shared/dash-tags';
 import { EncryptInfo } from '../shared/encrypt-info';
 
 export class DashExtractor implements Extractor {
-  static #DEFAULT_METHOD: EncryptMethod = EncryptMethod.CENC;
+  static #DEFAULT_METHOD: EncryptMethod = ENCRYPT_METHODS.CENC;
 
-  readonly extractorType: ExtractorType = ExtractorType.MPEG_DASH;
+  get extractorType(): ExtractorType {
+    return EXTRACTOR_TYPES.MPEG_DASH;
+  }
 
   #mpdUrl = '';
   #baseUrl = '';
@@ -43,7 +45,7 @@ export class DashExtractor implements Extractor {
   }
 
   #getFrameRate(node: Element): number | undefined {
-    const frameRate = node.attributes['frameRate'];
+    const frameRate = node.getAttribute('frameRate');
     if (!frameRate || !frameRate.includes('/')) return;
     const d = Number(frameRate.split('/')[0]) / Number(frameRate.split('/')[1]);
     return Number(d.toFixed(3));
@@ -120,11 +122,11 @@ export class DashExtractor implements Extractor {
           streamSpec.url = this.#mpdUrl;
           const mimeTypePart = mimeType.split('/')[0];
           if (mimeTypePart === 'text') {
-            streamSpec.mediaType = MediaType.SUBTITLES;
+            streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
           } else if (mimeTypePart === 'audio') {
-            streamSpec.mediaType = MediaType.AUDIO;
+            streamSpec.mediaType = MEDIA_TYPES.AUDIO;
           } else if (mimeTypePart === 'video') {
-            streamSpec.mediaType = MediaType.VIDEO;
+            streamSpec.mediaType = MEDIA_TYPES.VIDEO;
           }
 
           const volumeAdjust = representation.getAttribute('volumeAdjust');
@@ -140,7 +142,7 @@ export class DashExtractor implements Extractor {
           }
 
           if (streamSpec.codecs === 'stpp' || streamSpec.codecs === 'wvtt') {
-            streamSpec.mediaType = MediaType.SUBTITLES;
+            streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
           }
 
           const role =
@@ -153,10 +155,10 @@ export class DashExtractor implements Extractor {
             const roleType = RoleType[roleTypeKey];
             streamSpec.role = roleType;
             if (roleType === RoleType.Subtitle) {
-              streamSpec.mediaType = MediaType.SUBTITLES;
+              streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
               if (mType?.includes('ttml')) streamSpec.extension = 'ttml';
             } else if (roleType === RoleType.ForcedSubtitle) {
-              streamSpec.mediaType = MediaType.SUBTITLES;
+              streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
             }
           }
 
@@ -192,7 +194,7 @@ export class DashExtractor implements Extractor {
                 streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
               } else {
                 const initUrl = combineUrl(segBaseUrl, sourceUrl);
-                const initRange = initialization.attributes['range'];
+                const initRange = initialization.getAttribute('range');
                 const initSegment = new MediaSegment();
                 initSegment.index = -1;
                 initSegment.url = initUrl;
@@ -423,11 +425,11 @@ export class DashExtractor implements Extractor {
               }
             }
           } else {
-            if (streamSpec.mediaType === MediaType.SUBTITLES && streamSpec.extension === 'mp4') {
+            if (streamSpec.mediaType === MEDIA_TYPES.SUBTITLES && streamSpec.extension === 'mp4') {
               streamSpec.extension = 'm4s';
             }
             if (
-              streamSpec.mediaType !== MediaType.SUBTITLES &&
+              streamSpec.mediaType !== MEDIA_TYPES.SUBTITLES &&
               (streamSpec.extension == null ||
                 streamSpec.playlist.mediaParts.reduce(
                   (sum, part) => sum + part.mediaSegments.length,
@@ -445,9 +447,9 @@ export class DashExtractor implements Extractor {
       }
     }
 
-    const audioList = streamList.filter((stream) => stream.mediaType === MediaType.AUDIO);
-    const subtitleList = streamList.filter((stream) => stream.mediaType === MediaType.SUBTITLES);
-    const videoList = streamList.filter((stream) => stream.mediaType === MediaType.VIDEO);
+    const audioList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.AUDIO);
+    const subtitleList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.SUBTITLES);
+    const videoList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.VIDEO);
 
     for (const video of videoList) {
       const audioGroupId = audioList

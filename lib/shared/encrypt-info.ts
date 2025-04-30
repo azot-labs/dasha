@@ -1,7 +1,7 @@
-import { EncryptMethod } from './encrypt-method';
+import { ENCRYPT_METHODS, EncryptMethod } from './encrypt-method';
 
 export class EncryptInfo {
-  method: EncryptMethod = EncryptMethod.NONE;
+  method: EncryptMethod = ENCRYPT_METHODS.NONE;
   key?: Buffer;
   iv?: Buffer;
 
@@ -11,9 +11,9 @@ export class EncryptInfo {
 
   parseMethod(method?: string): EncryptMethod {
     if (method !== undefined) {
-      return EncryptMethod[method.replace('-', '_')];
+      return ENCRYPT_METHODS[method.replace('-', '_') as keyof typeof ENCRYPT_METHODS];
     } else {
-      return EncryptMethod.UNKNOWN;
+      return ENCRYPT_METHODS.UNKNOWN;
     }
   }
 }
