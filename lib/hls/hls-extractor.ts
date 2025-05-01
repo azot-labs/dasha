@@ -196,7 +196,7 @@ export class HlsExtractor implements Extractor {
         const uri = getAttribute(line, 'URI');
         const uriLast = getAttribute(lastKeyLine, 'URI');
         if (uri !== uriLast) {
-          const parsedInfo = this.#parseKey(line);
+          const parsedInfo = await this.#parseKey(line);
           currentEncryptInfo.method = parsedInfo.method;
           currentEncryptInfo.key = parsedInfo.key;
           currentEncryptInfo.iv = parsedInfo.iv;
@@ -284,7 +284,7 @@ export class HlsExtractor implements Extractor {
     return playlist;
   }
 
-  #parseKey(keyLine: string): EncryptInfo {
+  async #parseKey(keyLine: string) {
     for (const p of this.parserConfig.keyProcessors) {
       if (
         p.canProcess(
