@@ -1,4 +1,4 @@
-import { EncryptMethod } from '../shared/encrypt-method';
+import { EncryptMethod } from './shared/encrypt-method';
 
 export class ParserConfig {
   url: string = '';

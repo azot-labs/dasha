@@ -7,8 +7,6 @@
   ],
   "scripts": {
     "test": "vitest",
-    "types": "tsc -p tsconfig.json",
-    "format": "prettier --write .",
     "lint": "eslint . && prettier --check .",
     "fix": "eslint . --fix && prettier --write .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
