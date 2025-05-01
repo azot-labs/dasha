@@ -7,7 +7,7 @@
 Library for parsing MPEG-DASH (.mpd) and HLS (.m3u8) manifests. Made with the purpose of obtaining a simplified representation convenient for further downloading of segments.
 
 > [!WARNING]  
-> This README is for the alpha version. Info about latest stable version is available on [NPM](https://www.npmjs.com/package/dasha/v/3.1.5) or [this GitHub branch](https://github.com/streamyx-labs/dasha/tree/v3).
+> This README is for the alpha version. Info about latest stable version is available on [NPM](https://www.npmjs.com/package/dasha/v/3.1.5) or [another GitHub branch](https://github.com/streamyx-labs/dasha/tree/v3).
 
 
 ## Install
