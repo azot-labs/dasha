@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { ExtractorType } from './shared/extractor-type';
-import { ParserConfig } from './config/parser-config';
+import { ParserConfig } from './parser-config';
 import { Extractor } from './extractor';
 import { HLS_TAGS } from './hls/hls-tags';
 import { DashExtractor } from './dash/dash-extractor';

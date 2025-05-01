@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { StreamExtractor } from '../lib/stream-extractor';
 import { MEDIA_TYPES } from '../lib/shared/media-type';
-import { ParserConfig } from '../lib/config/parser-config';
+import { ParserConfig } from '../lib/parser-config';
 import { load } from './utils';
 
 test('parse axinom mpd from text', async () => {
