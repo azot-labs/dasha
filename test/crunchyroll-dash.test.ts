@@ -4,7 +4,7 @@ import { MEDIA_TYPES } from '../lib/shared/media-type';
 import { load } from './utils';
 
 test('parse crunchyroll mpd from text', async () => {
-  const text = await load('crunchyroll.mpd');
+  const { text } = await load('crunchyroll.mpd');
 
   const streamExtractor = new StreamExtractor();
   await streamExtractor.loadSourceFromText(text);

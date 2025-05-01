@@ -5,7 +5,7 @@ import { load } from './utils';
 
 test('parse bitmovin mpd from text', async () => {
   const url = 'https://cdn.bitmovin.com/content/assets/art-of-motion_drm/mpds/11331.mpd';
-  const text = await load('bitmovin.mpd');
+  const { text } = await load('bitmovin.mpd');
 
   const streamExtractor = new StreamExtractor();
   await streamExtractor.loadSourceFromText(text, url);
