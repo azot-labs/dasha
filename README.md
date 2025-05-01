@@ -23,13 +23,16 @@ import fs from 'node:fs/promises';
 import { parse } from 'dasha';
 
 const url = 'https://dash.akamaized.net/dash264/TestCases/1a/sony/SNE_DASH_SD_CASE1A_REVISED.mpd';
-const body = await fetch(url).then((res) => res.text());
-const manifest = await parse(body, url);
+const streamExtractor = new StreamExtractor();
+await streamExtractor.loadSourceFromUrl(url);
+const streams = await streamExtractor.extractStreams();
 
-for (const track of manifest.tracks.all) {
-  for (const segment of track.segments) {
-    const content = await fetch(url).then((res) => res.arrayBuffer());
-    await fs.appendFile(`${track.id}.mp4`, content);
+for (const stream of streams) {
+  const segments = stream.playlist?.mediaParts[0].mediaSegments || [];
+  const filename = `${stream.name}_${stream.groupId}`;
+  for (const segment of segments) {
+    const content = await fetch(segment.url).then((res) => res.arrayBuffer());
+    await fs.appendFile(`${filename}.${stream.extension}`, content);
   }
 }
 ```
