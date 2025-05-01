@@ -13,7 +13,7 @@ Library for parsing MPEG-DASH (.mpd) and HLS (.m3u8) manifests. Made with the pu
 ## Install
 
 ```shell
-npm i dasha@4.0.0-alpha.1
+npm i dasha@alpha
 ```
 
 ## Usage
