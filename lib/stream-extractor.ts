@@ -4,11 +4,11 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { ExtractorType } from './shared/extractor-type';
 import { ParserConfig } from './config/parser-config';
-import { Extractor } from './extractor/extractor';
-import { HLS_TAGS } from './shared/hls-tags';
-import { DashExtractor } from './extractor/dash-extractor';
+import { Extractor } from './extractor';
+import { HLS_TAGS } from './hls/hls-tags';
+import { DashExtractor } from './dash/dash-extractor';
 import { StreamSpec } from './shared/stream-spec';
-import { HlsExtractor } from './extractor/hls-extractor';
+import { HlsExtractor } from './hls/hls-extractor';
 
 export class StreamExtractor {
   #extractor!: Extractor;

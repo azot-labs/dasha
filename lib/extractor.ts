@@ -1,5 +1,5 @@
-import { ExtractorType } from '../shared/extractor-type';
-import { StreamSpec } from '../shared/stream-spec';
+import { ExtractorType } from './shared/extractor-type';
+import { StreamSpec } from './shared/stream-spec';
 
 export interface Extractor {
   extractorType: ExtractorType;

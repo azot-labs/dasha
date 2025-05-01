@@ -1,4 +1,4 @@
-import { DASH_TAGS } from './dash-tags';
+import { DASH_TAGS } from '../dash/dash-tags';
 
 export const combineUrl = (baseUrl: string, relativeUrl: string) => {
   if (!baseUrl.trim()) return relativeUrl;
@@ -7,17 +7,7 @@ export const combineUrl = (baseUrl: string, relativeUrl: string) => {
   return url2.toString();
 };
 
-/**
- * Extracts StartRange and ExpectLength information from a string like "100-300"
- * @param range - The range string in the format "start-end"
- * @returns A tuple containing [StartRange, ExpectLength]
- */
-export function parseRange(range: string): [number, number] {
-  const [start, end] = range.split('-').map(Number);
-  return [start, end - start + 1];
-}
-
-export function replaceVars(text: string, dict: Record<string, any>): string {
+export const replaceVars = (text: string, dict: Record<string, any>) => {
   let result = text;
   for (const [key, value] of Object.entries(dict)) {
     result = result.replaceAll(key, String(value));
@@ -31,26 +21,7 @@ export function replaceVars(text: string, dict: Record<string, any>): string {
   }
 
   return result;
-}
-
-/**
- * Extracts length and optional start values from a string formatted as "n[@o]".
- * @param input - The input string.
- * @returns A tuple containing [n (length), o (start)].
- */
-export function getRange(input: string): [number, number | null] {
-  const parts = input.split('@');
-  switch (parts.length) {
-    case 0:
-      return [0, null];
-    case 1:
-      return [parseInt(parts[0], 10), null];
-    case 2:
-      return [parseInt(parts[0], 10), parseInt(parts[1], 10)];
-    default:
-      return [0, null];
-  }
-}
+};
 
 /**
  * Extracts parameters from text like:
@@ -59,7 +30,7 @@ export function getRange(input: string): [number, number | null] {
  * @param key - If empty, returns all characters after the first colon
  * @returns The extracted attribute value
  */
-export function getAttribute(line: string, key: string = ''): string {
+export const getAttribute = (line: string, key: string = '') => {
   line = line.trim();
   if (key === '') {
     return line.slice(line.indexOf(':') + 1);
@@ -78,7 +49,7 @@ export function getAttribute(line: string, key: string = ''): string {
   }
 
   return result;
-}
+};
 
 export const distinctBy = <T>(array: T[], callbackfn: (item: T) => unknown) => {
   const seen = new Set();

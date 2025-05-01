@@ -1,18 +1,19 @@
 import { Temporal } from 'temporal-polyfill';
 import { DOMParser, Element } from '@xmldom/xmldom';
 import { EXTRACTOR_TYPES, ExtractorType } from '../shared/extractor-type';
-import { ParserConfig } from '../config/parser-config';
+import { ParserConfig } from '../parser-config';
 import { ENCRYPT_METHODS, EncryptMethod } from '../shared/encrypt-method';
 import { StreamSpec } from '../shared/stream-spec';
-import { Extractor } from './extractor';
-import { combineUrl, parseRange, replaceVars } from '../shared/util';
+import { Extractor } from '../extractor';
+import { combineUrl, replaceVars } from '../shared/util';
 import { Playlist } from '../shared/playlist';
 import { MediaPart } from '../shared/media-part';
-import { MEDIA_TYPES, MediaType } from '../shared/media-type';
-import { ROLE_TYPE, RoleType } from '../shared/role-type';
+import { MEDIA_TYPES } from '../shared/media-type';
+import { ROLE_TYPE } from '../shared/role-type';
 import { MediaSegment } from '../shared/media-segment';
-import { DASH_TAGS } from '../shared/dash-tags';
+import { DASH_TAGS } from './dash-tags';
 import { EncryptInfo } from '../shared/encrypt-info';
+import { parseRange } from './dash-utils';
 
 export class DashExtractor implements Extractor {
   static #DEFAULT_METHOD: EncryptMethod = ENCRYPT_METHODS.CENC;
@@ -125,7 +126,7 @@ export class DashExtractor implements Extractor {
             streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
           } else if (mimeTypePart === 'audio') {
             streamSpec.mediaType = MEDIA_TYPES.AUDIO;
-          } else if (mimeTypePart === 'video') {
+          } else if (mimeTypePart === 'video' || !!streamSpec.resolution) {
             streamSpec.mediaType = MEDIA_TYPES.VIDEO;
           }
 

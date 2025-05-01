@@ -1,16 +1,17 @@
-import { MEDIA_TYPES } from './../shared/media-type';
+import { readFile } from 'node:fs/promises';
+import { MEDIA_TYPES } from '../shared/media-type';
 import { EXTRACTOR_TYPES, type ExtractorType } from 'lib/shared/extractor-type';
-import { Extractor } from './extractor';
-import { ParserConfig } from 'lib/config/parser-config';
-import { HLS_TAGS } from 'lib/shared/hls-tags';
+import { Extractor } from '../extractor';
+import { ParserConfig } from 'lib/parser-config';
+import { HLS_TAGS } from 'lib/hls/hls-tags';
 import { StreamSpec } from 'lib/shared/stream-spec';
-import { combineUrl, distinctBy, getAttribute, getRange } from 'lib/shared/util';
+import { combineUrl, distinctBy, getAttribute } from 'lib/shared/util';
 import { Playlist } from 'lib/shared/playlist';
 import { MediaPart } from 'lib/shared/media-part';
 import { EncryptInfo } from 'lib/shared/encrypt-info';
 import { MediaSegment } from 'lib/shared/media-segment';
 import { ENCRYPT_METHODS } from 'lib/shared/encrypt-method';
-import { readFile } from 'node:fs/promises';
+import { getRange } from './hls-utils';
 
 export class HlsExtractor implements Extractor {
   get extractorType(): ExtractorType {
