@@ -16,12 +16,36 @@ jobs:
           registry-url: https://registry.npmjs.org/
       - run: npm ci
       - run: npm run build
-      - run: npm publish
+
+      # Extract version from package.json and determine release channel
+      - name: Parse version and determine release channel
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+          if [[ $VERSION == *"-alpha."* ]]; then
+            echo "NPM_TAG=alpha" >> $GITHUB_OUTPUT
+            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
+          elif [[ $VERSION == *"-beta."* ]]; then
+            echo "NPM_TAG=beta" >> $GITHUB_OUTPUT
+            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
+          else
+            echo "NPM_TAG=latest" >> $GITHUB_OUTPUT
+          fi
+
+      # Publish with the appropriate tag
+      - name: Publish to npm
+        run: npm publish --tag ${{ steps.version.outputs.NPM_TAG }}
         env:
-          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
-      - uses: softprops/action-gh-release@v2
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Only create GitHub releases for stable versions
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ steps.version.outputs.PRERELEASE == 'true' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
 permissions:
