@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["lib/**/*.ts", "types/**/*.ts"]
+  "include": ["*.ts", "lib/**/*.ts"]
 }

@@ -7,7 +7,7 @@ export const combineUrl = (baseUrl: string, relativeUrl: string) => {
   return url2.toString();
 };
 
-export const replaceVars = (text: string, dict: Record<string, any>) => {
+export const replaceVars = (text: string, dict: Record<string, string>) => {
   let result = text;
   for (const [key, value] of Object.entries(dict)) {
     result = result.replaceAll(key, String(value));
@@ -15,8 +15,10 @@ export const replaceVars = (text: string, dict: Record<string, any>) => {
 
   const regex = /\$Number%([0-9]+)d\$/g;
   if (regex.test(result)) {
-    result = result.replace(regex, (match, p1) => {
-      return dict[DASH_TAGS.TemplateNumber]?.toString().padStart(parseInt(p1), '0');
+    const template = dict[DASH_TAGS.TemplateNumber];
+    result = result.replace(regex, (_match, p1: string) => {
+      if (!template) return '';
+      return template.toString().padStart(parseInt(p1), '0');
     });
   }
 

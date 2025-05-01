@@ -43,7 +43,7 @@ export class StreamSpec {
   toShortString() {
     let prefixStr = '';
     let returnStr = '';
-    let encStr = '';
+    const encStr = '';
 
     const bandwidth = this.bandwidth ? `${this.bandwidth / 1000} Kbps` : '';
     const channels = this.channels ? `${this.channels}CH` : '';

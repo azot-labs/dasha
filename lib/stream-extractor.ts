@@ -50,10 +50,10 @@ export class StreamExtractor {
       this.#setUrl(absoluteUri);
     }
     this.#rawText = this.#rawText.trim();
-    await this.loadSourceFromText(this.#rawText);
+    this.loadSourceFromText(this.#rawText);
   }
 
-  async loadSourceFromText(rawText: string, url?: string) {
+  loadSourceFromText(rawText: string, url?: string) {
     if (url) this.#setUrl(url);
     let rawType = 'txt';
     this.#rawText = rawText.trim();

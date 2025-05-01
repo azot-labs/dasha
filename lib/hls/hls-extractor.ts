@@ -138,7 +138,6 @@ export class HlsExtractor implements Extractor {
     let isEndList = false;
     let segIndex = 0;
     let isAd = false;
-    let startIndex: number;
 
     const playlist = new Playlist();
     const mediaParts: MediaPart[] = [];
@@ -156,7 +155,6 @@ export class HlsExtractor implements Extractor {
 
     let lastKeyLine = '';
 
-    let mediaPart = new MediaPart();
     let segment = new MediaSegment();
     let segments: MediaSegment[] = [];
 
@@ -182,7 +180,6 @@ export class HlsExtractor implements Extractor {
         playlist.targetDuration = Number(getAttribute(line));
       } else if (line.startsWith(HLS_TAGS.extXMediaSequence)) {
         segIndex = Number(getAttribute(line));
-        startIndex = segIndex;
       } else if (line.startsWith(HLS_TAGS.extXProgramDateTime)) {
         segment.dateTime = new Date(getAttribute(line));
       } else if (line.startsWith(HLS_TAGS.extXDiscontinuity)) {

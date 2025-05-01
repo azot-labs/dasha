@@ -1,13 +1,34 @@
 import { defineConfig, globalIgnores } from 'eslint/config';
 import globals from 'globals';
-import pluginJs from '@eslint/js';
+import tseslint from 'typescript-eslint';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 
 export default defineConfig([
-  globalIgnores(['dist/']),
-  { files: ['./lib/**/*.ts'], languageOptions: { sourceType: 'module' } },
-  { languageOptions: { globals: globals.node } },
-  pluginJs.configs.recommended,
+  globalIgnores(['*.mjs', 'dist/', 'test/']),
+  tseslint.config(tseslint.configs.strict, {
+    languageOptions: {
+      parserOptions: {
+        project: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  }),
+  {
+    files: ['*.ts', 'lib/**/*.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
+    },
+  },
   eslintPluginPrettierRecommended,
-  { rules: { 'no-unused-vars': ['error', { caughtErrors: 'none' }] } },
+  {
+    rules: {
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['warn'],
+      '@typescript-eslint/no-explicit-any': ['warn'],
+      '@typescript-eslint/no-non-null-assertion': ['warn'],
+    },
+  },
 ]);
