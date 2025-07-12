@@ -378,12 +378,21 @@ export class DashExtractor implements Extractor {
             streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
           }
 
-          const contentProtection =
-            adaptationSet.getElementsByTagName('ContentProtection')[0] ||
-            representation.getElementsByTagName('ContentProtection')[0];
-          if (contentProtection) {
+          const adaptationSetProtections = adaptationSet.getElementsByTagName('ContentProtection');
+          const representationProtections =
+            representation.getElementsByTagName('ContentProtection');
+          const contentProtections = representationProtections[0]
+            ? representationProtections
+            : adaptationSetProtections;
+          if (contentProtections.length) {
             const encryptInfo = new EncryptInfo();
             encryptInfo.method = DashExtractor.#DEFAULT_METHOD;
+
+            for (const contentProtection of contentProtections) {
+              const schemeIdUri = contentProtection.getAttribute('schemeIdUri');
+              // TODO: Add content protection to stream spec ?
+            }
+
             if (streamSpec.playlist.mediaInit) {
               streamSpec.playlist.mediaInit.encryptInfo = encryptInfo;
             }
@@ -473,19 +482,67 @@ export class DashExtractor implements Extractor {
     return v;
   }
 
-  fetchPlayList(streamSpecs: StreamSpec[]): Promise<void> {
-    throw new Error('Method not implemented.');
+  async refreshPlayList(streamSpecs: StreamSpec[]): Promise<void> {
+    if (!streamSpecs.length) return;
+
+    const response = await fetch(this.#parserConfig.url, this.#parserConfig.headers).catch(() =>
+      fetch(this.#parserConfig.originalUrl, this.#parserConfig.headers),
+    );
+    const rawText = await response.text();
+    const url = response.url;
+
+    this.#parserConfig.url = url;
+    this.#setInitUrl();
+
+    const newStreams = await this.extractStreams(rawText);
+    for (const streamSpec of streamSpecs) {
+      let results = newStreams.filter((n) => n.toShortString() === streamSpec.toShortString());
+      if (!results.length) {
+        results = newStreams.filter(
+          (n) => n.playlist?.mediaInit?.url === streamSpec.playlist?.mediaInit?.url,
+        );
+      }
+      if (results.length) {
+        streamSpec.playlist!.mediaParts = results.at(0)!.playlist!.mediaParts;
+      }
+    }
+
+    await this.#processUrl(streamSpecs);
   }
 
-  refreshPlayList(streamSpecs: StreamSpec[]): Promise<void> {
-    throw new Error('Method not implemented.');
+  async #processUrl(streamSpecs: StreamSpec[]): Promise<void> {
+    for (const spec of streamSpecs) {
+      const playlist = spec.playlist;
+      if (!playlist) continue;
+      if (playlist.mediaInit) {
+        playlist.mediaInit.url = this.preProcessUrl(playlist.mediaInit.url);
+      }
+      for (const part of playlist.mediaParts) {
+        for (const segment of part.mediaSegments) {
+          segment.url = this.preProcessUrl(segment.url);
+        }
+      }
+    }
+  }
+
+  async fetchPlayList(streamSpecs: StreamSpec[]): Promise<void> {
+    this.#processUrl(streamSpecs);
   }
 
   preProcessUrl(url: string): string {
-    throw new Error('Method not implemented.');
+    for (const processor of this.#parserConfig.urlProcessors) {
+      if (processor.canProcess(this.extractorType, url, this.#parserConfig)) {
+        url = processor.process(url, this.#parserConfig);
+      }
+    }
+    return url;
   }
 
   preProcessContent(): void {
-    throw new Error('Method not implemented.');
+    for (const processor of this.#parserConfig.contentProcessors) {
+      if (processor.canProcess(this.extractorType, this.#mpdContent, this.#parserConfig)) {
+        this.#mpdContent = processor.process(this.#mpdContent, this.#parserConfig);
+      }
+    }
   }
 }
