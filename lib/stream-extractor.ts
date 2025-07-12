@@ -69,8 +69,10 @@ export class StreamExtractor {
     ) {
       // TODO: Implement Smooth Streaming extractor
       rawType = 'ism';
+      throw new Error('Smooth Streaming is not supported yet');
     } else if (rawText === '<RE_LIVE_TS>') {
       // TODO: Implement Live TS extractor
+      throw new Error('Live TS is not supported yet');
     } else {
       throw new Error('Unsupported stream type');
     }
