@@ -62,6 +62,7 @@
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.8",
+    "barsic": "^0.2.0",
     "temporal-polyfill": "^0.3.0"
   },
   "devDependencies": {

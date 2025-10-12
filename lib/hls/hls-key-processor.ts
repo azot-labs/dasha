@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { b } from 'barsic';
 import { KeyProcessor } from '../processor';
 import { EXTRACTOR_TYPES, ExtractorType } from '../shared/extractor-type';
 import { ParserConfig } from '../parser-config';
@@ -20,13 +21,11 @@ export class DefaultHlsKeyProcessor implements KeyProcessor {
     const method = this.getAttribute(keyLine, 'METHOD');
     const uri = this.getAttribute(keyLine, 'URI');
 
-    console.debug(`METHOD:${method}, URI:${uri}, IV:${iv}`);
-
     const encryptInfo = new EncryptInfo(method);
 
     // Handle IV
     if (iv) {
-      encryptInfo.iv = Buffer.from(iv, 'hex');
+      encryptInfo.iv = b.hex().encode(iv);
     }
     if (parserConfig.customIv && parserConfig.customIv.length > 0) {
       encryptInfo.iv = parserConfig.customIv;
@@ -40,11 +39,11 @@ export class DefaultHlsKeyProcessor implements KeyProcessor {
         const lowerUri = uri.toLowerCase();
 
         if (lowerUri.startsWith('base64:')) {
-          encryptInfo.key = Buffer.from(uri.slice(7), 'base64');
+          encryptInfo.key = b.base64().encode(uri.slice(7));
         } else if (lowerUri.startsWith('data:;base64,')) {
-          encryptInfo.key = Buffer.from(uri.slice(13), 'base64');
+          encryptInfo.key = b.base64().encode(uri.slice(13));
         } else if (lowerUri.startsWith('data:text/plain;base64,')) {
-          encryptInfo.key = Buffer.from(uri.slice(23), 'base64');
+          encryptInfo.key = b.base64().encode(uri.slice(23));
         } else if (existsSync(uri)) {
           encryptInfo.key = readFileSync(uri);
         } else {
@@ -67,18 +66,18 @@ export class DefaultHlsKeyProcessor implements KeyProcessor {
   }
 
   private getAttribute(line: string, attrName: string): string | null {
-    const regex = new RegExp(`${attrName}="([^"]+)"`, 'i');
+    const regex = new RegExp(`${attrName}=(?:"([^"]+)"|([^,]+))`, 'i');
     const match = line.match(regex);
-    return match?.[1] ?? null;
+    return match?.[1] ?? match?.[2] ?? null;
   }
 
-  private async fetchKeyWithRetry(url: string, parserConfig: ParserConfig): Promise<Buffer> {
+  private async fetchKeyWithRetry(url: string, parserConfig: ParserConfig): Promise<Uint8Array> {
     let retryCount = parserConfig.keyRetryCount ?? 3;
 
     while (retryCount >= 0) {
       try {
         const response = await fetch(url, { headers: parserConfig.headers });
-        return Buffer.from(await response.arrayBuffer());
+        return new Uint8Array(await response.arrayBuffer());
       } catch (error: any) {
         if (error.message.includes('scheme is not supported')) throw error;
 

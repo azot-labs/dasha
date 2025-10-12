@@ -19,8 +19,8 @@ export class ParserConfig {
   keyProcessors: KeyProcessor[] = [new DefaultHlsKeyProcessor()];
 
   customMethod?: EncryptMethod;
-  customKey?: Buffer;
-  customIv?: Buffer;
+  customKey?: Uint8Array;
+  customIv?: Uint8Array;
   urlProcessorArgs?: string;
 
   appendUrlParams: boolean = false;

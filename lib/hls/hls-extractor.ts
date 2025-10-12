@@ -305,7 +305,6 @@ export class HlsExtractor implements Extractor {
     this.#m3u8Content = rawText;
     this.preProcessContent();
     if (this.#m3u8Content.includes(HLS_TAGS.extXStreamInf)) {
-      console.log('Master m3u8 found');
       return this.#parseMasterList().then((lists) => distinctBy(lists, (list) => list.url));
     }
 

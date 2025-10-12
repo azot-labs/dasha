@@ -4,8 +4,8 @@ type DrmType = 'widevine' | 'playready' | 'fairplay';
 
 export class EncryptInfo {
   method: EncryptMethod = ENCRYPT_METHODS.NONE;
-  key?: Buffer;
-  iv?: Buffer;
+  key?: Uint8Array;
+  iv?: Uint8Array;
   drm: { [key in DrmType]?: { keyId?: string; pssh?: string } };
 
   constructor(method?: string | null) {
