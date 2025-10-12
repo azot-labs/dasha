@@ -1,12 +1,13 @@
 export const ENCRYPT_METHODS = {
-  NONE: 0,
-  AES_128: 1,
-  AES_128_ECB: 2,
-  SAMPLE_AES: 3,
-  SAMPLE_AES_CTR: 4,
-  CENC: 5,
-  CHACHA20: 6,
-  UNKNOWN: 7,
-};
+  NONE: 'none',
+  AES_128: 'aes-128',
+  AES_128_ECB: 'aes-128-ecb',
+  SAMPLE_AES: 'sample-aes',
+  SAMPLE_AES_CTR: 'sample-aes-ctr',
+  CENC: 'cenc',
+  CHACHA20: 'chacha20',
+  UNKNOWN: 'unknown',
+} as const;
 
-export type EncryptMethod = (typeof ENCRYPT_METHODS)[keyof typeof ENCRYPT_METHODS];
+export type EncryptMethod =
+  (typeof ENCRYPT_METHODS)[keyof typeof ENCRYPT_METHODS];
