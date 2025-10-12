@@ -2,24 +2,22 @@ import { ParserConfig } from './parser-config';
 import { ExtractorType } from './shared/extractor-type';
 import { EncryptInfo } from './shared/encrypt-info';
 
-export abstract class ContentProcessor {
-  abstract canProcess(
-    extractorType: ExtractorType,
-    rawText: string,
-    parserConfig: ParserConfig,
-  ): boolean;
-  abstract process(rawText: string, parserConfig: ParserConfig): string;
+export interface ContentProcessor {
+  canProcess(extractorType: ExtractorType, rawText: string, parserConfig: ParserConfig): boolean;
+
+  process(rawText: string, parserConfig: ParserConfig): string;
 }
 
-export abstract class KeyProcessor {
-  abstract canProcess(
+export interface KeyProcessor {
+  canProcess(
     extractorType: ExtractorType,
     keyLine: string,
     m3u8Url: string,
     m3u8Content: string,
     parserConfig: ParserConfig,
   ): boolean;
-  abstract process(
+
+  process(
     keyLine: string,
     m3u8Url: string,
     m3u8Content: string,
@@ -27,16 +25,17 @@ export abstract class KeyProcessor {
   ): Promise<EncryptInfo>;
 }
 
-export abstract class UrlProcessor {
-  abstract canProcess(
+export interface UrlProcessor {
+  canProcess(
     extractorType: ExtractorType,
     originalUrl: string,
     parserConfig: ParserConfig,
   ): boolean;
-  abstract process(originalUrl: string, parserConfig: ParserConfig): string;
+
+  process(originalUrl: string, parserConfig: ParserConfig): string;
 }
 
-export class DefaultUrlProcessor extends UrlProcessor {
+export class DefaultUrlProcessor implements UrlProcessor {
   canProcess(_extractorType: ExtractorType, _originalUrl: string, parserConfig: ParserConfig) {
     return parserConfig.appendUrlParams;
   }

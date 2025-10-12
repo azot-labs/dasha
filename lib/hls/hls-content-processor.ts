@@ -3,7 +3,7 @@ import { ParserConfig } from '../parser-config';
 import { ContentProcessor } from '../processor';
 import { HLS_TAGS } from './hls-tags';
 
-export class DefaultHlsContentProcessor extends ContentProcessor {
+export class DefaultHlsContentProcessor implements ContentProcessor {
   private static readonly YkDVRegex =
     /#EXT-X-DISCONTINUITY\s+#EXT-X-MAP:URI="(.*?)",BYTERANGE="(.*?)"/g;
   private static readonly DNSPRegex = /#EXT-X-MAP:URI=".*?BUMPER\/[\s\S]+?#EXT-X-DISCONTINUITY/;

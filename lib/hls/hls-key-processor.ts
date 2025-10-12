@@ -5,7 +5,7 @@ import { ParserConfig } from '../parser-config';
 import { EncryptInfo } from '../shared/encrypt-info';
 import { ENCRYPT_METHODS } from '../shared/encrypt-method';
 
-export class DefaultHlsKeyProcessor extends KeyProcessor {
+export class DefaultHlsKeyProcessor implements KeyProcessor {
   canProcess(extractorType: ExtractorType): boolean {
     return extractorType === EXTRACTOR_TYPES.HLS;
   }
