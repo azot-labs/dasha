@@ -3,7 +3,7 @@ import { StreamExtractor } from '../lib/stream-extractor';
 import { load } from './utils';
 
 test('parse kion mpd from text', async () => {
-  const { text } = await load('kion.mpd');
+  const { text } = await load('dash-kion.mpd');
 
   const streamExtractor = new StreamExtractor();
   await streamExtractor.loadSourceFromText(text);

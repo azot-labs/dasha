@@ -8,8 +8,8 @@ import { MEDIA_TYPES } from '../lib/shared/media-type';
 const url =
   'https://edge01d.mediavitrina.ru/dashp-livef1/1tv/index.mpd?token=v2.UXXsCCSMCCTTVDmhGxWCp9KTljI-HYTKlSF6rqtU3kk.e-Prmld6_GahcPCbaegwQtS8wABF-vXF1h-AkMAH3QM.1760855459.c93d2097d438eb27ad0d7d4396b1d8e7';
 
-test('parse vitrina live dash from text', async () => {
-  const { text } = await load('vitrina-dash-live-drm.mpd');
+test('parse live dash from vitrina', async () => {
+  const { text } = await load('dash-live-drm-vitrina.mpd');
 
   const parseConfig = new ParserConfig();
   const extractor = new StreamExtractor(parseConfig);
