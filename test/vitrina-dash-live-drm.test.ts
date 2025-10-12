@@ -27,16 +27,12 @@ test('parse vitrina live dash from text', async () => {
 
   expect(streams.length).toBe(7);
 
-  const video = streams.find(
-    (stream) => stream.mediaType === MEDIA_TYPES.VIDEO,
-  );
+  const video = streams.find((stream) => stream.mediaType === MEDIA_TYPES.VIDEO);
   const encryptInfo = video?.playlist?.mediaInit?.encryptInfo;
   expect(encryptInfo?.drm.widevine?.pssh).toBe(
     'AAAAeXBzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAAFkIARIgZTY0YzNkZDczNmUyMWZiMGExYjQ4MjQ2MTljOGFkODQaDWNkbm5vd3ZpdHJpbmEiJDAyNmRhN2U5LTBkMzUtNGRiMi1hZGVhLTIxZjkyYTA4ZDMyYQ==',
   );
 
-  const isLiveStreams = streams.every(
-    (stream) => stream.playlist?.isLive === true,
-  );
+  const isLiveStreams = streams.every((stream) => stream.playlist?.isLive === true);
   expect(isLiveStreams).toBe(true);
 });

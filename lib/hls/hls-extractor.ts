@@ -42,17 +42,8 @@ export class HlsExtractor implements Extractor {
     }
 
     for (const processor of this.parserConfig.contentProcessors) {
-      if (
-        processor.canProcess(
-          this.extractorType,
-          this.#m3u8Content,
-          this.parserConfig,
-        )
-      ) {
-        this.#m3u8Content = processor.process(
-          this.#m3u8Content,
-          this.parserConfig,
-        );
+      if (processor.canProcess(this.extractorType, this.#m3u8Content, this.parserConfig)) {
+        this.#m3u8Content = processor.process(this.#m3u8Content, this.parserConfig);
       }
     }
   }
@@ -79,8 +70,7 @@ export class HlsExtractor implements Extractor {
         streamSpec = new StreamSpec();
         streamSpec.originalUrl = this.parserConfig.originalUrl;
         const bandwidth =
-          getAttribute(line, 'AVERAGE-BANDWIDTH') ||
-          getAttribute(line, 'BANDWIDTH');
+          getAttribute(line, 'AVERAGE-BANDWIDTH') || getAttribute(line, 'BANDWIDTH');
         streamSpec.bandwidth = Number(bandwidth || 0);
         streamSpec.codecs = getAttribute(line, 'CODECS');
         streamSpec.resolution = getAttribute(line, 'RESOLUTION');
@@ -115,17 +105,12 @@ export class HlsExtractor implements Extractor {
         const name = getAttribute(line, 'NAME');
         if (name) streamSpec.name = name;
         const defaultFlag = getAttribute(line, 'DEFAULT');
-        if (defaultFlag)
-          streamSpec.default = defaultFlag.toLowerCase() === 'yes';
+        if (defaultFlag) streamSpec.default = defaultFlag.toLowerCase() === 'yes';
         const channels = getAttribute(line, 'CHANNELS');
         if (channels) streamSpec.channels = channels;
         const characteristics = getAttribute(line, 'CHARACTERISTICS');
         if (characteristics) {
-          streamSpec.characteristics = characteristics
-            .split(',')
-            .at(-1)
-            ?.split('.')
-            .at(-1);
+          streamSpec.characteristics = characteristics.split(',').at(-1)?.split('.').at(-1);
         }
         streams.push(streamSpec);
       } else if (line.startsWith('#')) {
@@ -181,9 +166,7 @@ export class HlsExtractor implements Extractor {
         const [n, o] = getRange(p);
         segment.expectLength = n;
         segment.startRange =
-          o ||
-          (segments.at(-1)?.startRange || 0) +
-            (segments.at(-1)?.expectLength || 0);
+          o || (segments.at(-1)?.startRange || 0) + (segments.at(-1)?.expectLength || 0);
         expectSegment = true;
       } else if (line.startsWith('#UPLYNK-SEGMENT')) {
         if (line.includes(',ad')) {
@@ -273,11 +256,7 @@ export class HlsExtractor implements Extractor {
         segment.url = segUrl;
         segments.push(segment);
         segment = new MediaSegment();
-        if (
-          segUrl.includes('ccode=') &&
-          segUrl.includes('/ad/') &&
-          segUrl.includes('duratio=')
-        ) {
+        if (segUrl.includes('ccode=') && segUrl.includes('/ad/') && segUrl.includes('duratio=')) {
           segments.pop();
           segIndex--;
           hasAd = true;
@@ -316,12 +295,7 @@ export class HlsExtractor implements Extractor {
           this.parserConfig,
         )
       ) {
-        return p.process(
-          keyLine,
-          this.#m3u8Url,
-          this.#m3u8Content,
-          this.parserConfig,
-        );
+        return p.process(keyLine, this.#m3u8Url, this.#m3u8Content, this.parserConfig);
       }
     }
     throw new Error('No key processor found');
@@ -332,9 +306,7 @@ export class HlsExtractor implements Extractor {
     this.preProcessContent();
     if (this.#m3u8Content.includes(HLS_TAGS.extXStreamInf)) {
       console.log('Master m3u8 found');
-      return this.#parseMasterList().then((lists) =>
-        distinctBy(lists, (list) => list.url),
-      );
+      return this.#parseMasterList().then((lists) => distinctBy(lists, (list) => list.url));
     }
 
     const playlist = await this.#parseList();
@@ -379,9 +351,7 @@ export class HlsExtractor implements Extractor {
       distinctBy(lists, (list) => list.url),
     );
     for (const list of lists) {
-      const match = newStreams.filter(
-        (stream) => stream.toShortString() === list.toShortString(),
-      );
+      const match = newStreams.filter((stream) => stream.toShortString() === list.toShortString());
       if (!match.length) continue;
       list.url = match.at(0)!.url;
     }
@@ -393,9 +363,7 @@ export class HlsExtractor implements Extractor {
         await this.#loadM3u8FromUrl(list.url!);
       } catch (e) {
         if (this.#masterM3u8Flag) {
-          console.warn(
-            'Can not load m3u8. Try refreshing url from master url...',
-          );
+          console.warn('Can not load m3u8. Try refreshing url from master url...');
         }
         await this.#refreshUrlFromMaster(lists);
         await this.#loadM3u8FromUrl(list.url!);
@@ -414,8 +382,7 @@ export class HlsExtractor implements Extractor {
         );
         const b = list.playlist.mediaParts.some((part) =>
           part.mediaSegments.some(
-            (segment) =>
-              segment.url.includes('.vtt') || segment.url.includes('.webvtt'),
+            (segment) => segment.url.includes('.vtt') || segment.url.includes('.webvtt'),
           ),
         );
         if (a) list.extension = 'ttml';

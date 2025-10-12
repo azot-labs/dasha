@@ -57,24 +57,16 @@ export class DashExtractor implements Extractor {
 
     this.#mpdContent = rawText;
 
-    const document = new DOMParser().parseFromString(
-      this.#mpdContent,
-      'text/xml',
-    );
+    const document = new DOMParser().parseFromString(this.#mpdContent, 'text/xml');
     const mpdElement = document.getElementsByTagName('MPD')[0];
     const type = mpdElement.getAttribute('type');
     const isLive = type === 'dynamic';
 
     const maxSegmentDuration = mpdElement.getAttribute('maxSegmentDuration');
-    const availabilityStartTime = mpdElement.getAttribute(
-      'availabilityStartTime',
-    );
-    const timeShiftBufferDepth =
-      mpdElement.getAttribute('timeShiftBufferDepth') || 'PT1M';
+    const availabilityStartTime = mpdElement.getAttribute('availabilityStartTime');
+    const timeShiftBufferDepth = mpdElement.getAttribute('timeShiftBufferDepth') || 'PT1M';
     const publishTime = mpdElement.getAttribute('publishTime');
-    const mediaPresentationDuration = mpdElement.getAttribute(
-      'mediaPresentationDuration',
-    );
+    const mediaPresentationDuration = mpdElement.getAttribute('mediaPresentationDuration');
 
     const baseUrlElement = mpdElement.getElementsByTagName('BaseURL')[0];
     if (baseUrlElement?.textContent) {
@@ -100,11 +92,9 @@ export class DashExtractor implements Extractor {
         segBaseUrl = this.#extendBaseUrl(adaptationSet, segBaseUrl);
         const representationsBaseUrl = segBaseUrl;
         let mimeType =
-          adaptationSet.getAttribute('contentType') ||
-          adaptationSet.getAttribute('mimeType');
+          adaptationSet.getAttribute('contentType') || adaptationSet.getAttribute('mimeType');
         const frameRate = this.#getFrameRate(adaptationSet);
-        const representations =
-          adaptationSet.getElementsByTagName('Representation');
+        const representations = adaptationSet.getElementsByTagName('Representation');
         for (const representation of representations) {
           segBaseUrl = this.#extendBaseUrl(representation, segBaseUrl);
           if (!mimeType) {
@@ -122,18 +112,14 @@ export class DashExtractor implements Extractor {
           streamSpec.groupId = representation.getAttribute('id');
           streamSpec.bandwidth = Number(bandwidth || 0);
           streamSpec.codecs =
-            representation.getAttribute('codecs') ||
-            adaptationSet.getAttribute('codecs');
+            representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs');
           streamSpec.language = this.#filterLanguage(
-            representation.getAttribute('lang') ||
-              adaptationSet.getAttribute('lang'),
+            representation.getAttribute('lang') || adaptationSet.getAttribute('lang'),
           );
-          streamSpec.frameRate =
-            frameRate || this.#getFrameRate(representation);
+          streamSpec.frameRate = frameRate || this.#getFrameRate(representation);
           const width = representation.getAttribute('width');
           const height = representation.getAttribute('height');
-          streamSpec.resolution =
-            width && height ? `${width}x${height}` : undefined;
+          streamSpec.resolution = width && height ? `${width}x${height}` : undefined;
           streamSpec.url = this.#mpdUrl;
           const mimeTypePart = mimeType.split('/')[0];
           if (mimeTypePart === 'text') {
@@ -150,12 +136,10 @@ export class DashExtractor implements Extractor {
           }
 
           const mType =
-            representation.getAttribute('mimeType') ||
-            adaptationSet.getAttribute('mimeType');
+            representation.getAttribute('mimeType') || adaptationSet.getAttribute('mimeType');
           if (mType) {
             const mTypeSplit = mType.split('/');
-            streamSpec.extension =
-              mTypeSplit.length === 2 ? mTypeSplit[1] : null;
+            streamSpec.extension = mTypeSplit.length === 2 ? mTypeSplit[1] : null;
           }
 
           if (streamSpec.codecs === 'stpp' || streamSpec.codecs === 'wvtt') {
@@ -167,8 +151,7 @@ export class DashExtractor implements Extractor {
             adaptationSet.getElementsByTagName('Role')[0];
           if (role) {
             const roleValue = role.getAttribute('value');
-            const capitalize = (word: string) =>
-              word.charAt(0).toUpperCase() + word.slice(1);
+            const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
             const roleTypeKey = roleValue!.split('-').map(capitalize).join('');
             const roleType = ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
             streamSpec.role = roleType;
@@ -184,31 +167,24 @@ export class DashExtractor implements Extractor {
 
           if (timeShiftBufferDepth) {
             streamSpec.playlist.refreshIntervalMs =
-              Temporal.Duration.from(timeShiftBufferDepth).total(
-                'milliseconds',
-              ) / 2;
+              Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2;
           }
 
           const audioChannelConfiguration =
-            adaptationSet.getElementsByTagName(
-              'AudioChannelConfiguration',
-            )[0] ||
+            adaptationSet.getElementsByTagName('AudioChannelConfiguration')[0] ||
             representation.getElementsByTagName('AudioChannelConfiguration')[0];
 
           if (audioChannelConfiguration) {
-            streamSpec.channels =
-              audioChannelConfiguration.getAttribute('value');
+            streamSpec.channels = audioChannelConfiguration.getAttribute('value');
           }
 
           if (publishTime) {
             streamSpec.publishTime = new Date(publishTime);
           }
 
-          const segmentBaseElement =
-            representation.getElementsByTagName('SegmentBase')[0];
+          const segmentBaseElement = representation.getElementsByTagName('SegmentBase')[0];
           if (segmentBaseElement) {
-            const initialization =
-              segmentBaseElement.getElementsByTagName('Initialization')[0];
+            const initialization = segmentBaseElement.getElementsByTagName('Initialization')[0];
             if (initialization) {
               const sourceUrl = initialization.getAttribute('sourceURL');
               if (!sourceUrl) {
@@ -216,9 +192,7 @@ export class DashExtractor implements Extractor {
                 mediaSegment.index = 0;
                 mediaSegment.url = segBaseUrl;
                 mediaSegment.duration = periodDurationSeconds;
-                streamSpec.playlist.mediaParts[0].mediaSegments.push(
-                  mediaSegment,
-                );
+                streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
               } else {
                 const initUrl = combineUrl(segBaseUrl, sourceUrl);
                 const initRange = initialization.getAttribute('range');
@@ -235,12 +209,10 @@ export class DashExtractor implements Extractor {
             }
           }
 
-          const segmentList =
-            representation.getElementsByTagName('SegmentList')[0];
+          const segmentList = representation.getElementsByTagName('SegmentList')[0];
           if (segmentList) {
             const durationStr = segmentList.getAttribute('duration');
-            const initialization =
-              segmentList.getElementsByTagName('Initialization')[0];
+            const initialization = segmentList.getElementsByTagName('Initialization')[0];
             if (initialization) {
               const sourceUrl = initialization.getAttribute('sourceURL')!;
               const initUrl = combineUrl(segBaseUrl, sourceUrl);
@@ -258,16 +230,9 @@ export class DashExtractor implements Extractor {
 
             const segmentUrls = segmentList.getElementsByTagName('SegmentURL');
             const timescaleStr = segmentList.getAttribute('timescale') || '1';
-            for (
-              let segmentIndex = 0;
-              segmentIndex < segmentUrls.length;
-              segmentIndex++
-            ) {
+            for (let segmentIndex = 0; segmentIndex < segmentUrls.length; segmentIndex++) {
               const segmentUrl = segmentUrls[segmentIndex];
-              const mediaUrl = combineUrl(
-                segBaseUrl,
-                segmentUrl.getAttribute('media')!,
-              );
+              const mediaUrl = combineUrl(segBaseUrl, segmentUrl.getAttribute('media')!);
               const mediaRange = segmentUrl.getAttribute('mediaRange');
               const timescale = Number(timescaleStr);
               const duration = Number(durationStr);
@@ -286,14 +251,9 @@ export class DashExtractor implements Extractor {
 
           const segmentTemplateElementsOuter =
             adaptationSet.getElementsByTagName('SegmentTemplate');
-          const segmentTemplateElements =
-            representation.getElementsByTagName('SegmentTemplate');
-          if (
-            segmentTemplateElementsOuter.length ||
-            segmentTemplateElements.length
-          ) {
-            const segmentTemplate =
-              segmentTemplateElements[0] || segmentTemplateElementsOuter[0];
+          const segmentTemplateElements = representation.getElementsByTagName('SegmentTemplate');
+          if (segmentTemplateElementsOuter.length || segmentTemplateElements.length) {
+            const segmentTemplate = segmentTemplateElements[0] || segmentTemplateElementsOuter[0];
             const segmentTemplateOuter =
               segmentTemplateElementsOuter[0] || segmentTemplateElements[0];
             const varDic: Record<string, any> = {};
@@ -326,10 +286,8 @@ export class DashExtractor implements Extractor {
               streamSpec.playlist.mediaInit = mediaSegment;
             }
             const mediaTemplate =
-              segmentTemplate.getAttribute('media') ||
-              segmentTemplateOuter.getAttribute('media');
-            const segmentTimeline =
-              segmentTemplate.getElementsByTagName('SegmentTimeline')[0];
+              segmentTemplate.getAttribute('media') || segmentTemplateOuter.getAttribute('media');
+            const segmentTimeline = segmentTemplate.getElementsByTagName('SegmentTimeline')[0];
             if (segmentTimeline) {
               const Ss = segmentTimeline.getElementsByTagName('S');
               let segNumber = Number(startNumberStr);
@@ -355,22 +313,16 @@ export class DashExtractor implements Extractor {
                 }
                 mediaSegment.duration = _duration / timescale;
                 mediaSegment.index = segIndex++;
-                streamSpec.playlist.mediaParts[0].mediaSegments.push(
-                  mediaSegment,
-                );
+                streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
                 if (_repeatCount < 0) {
-                  _repeatCount =
-                    Math.ceil((periodDurationSeconds * timescale) / _duration) -
-                    1;
+                  _repeatCount = Math.ceil((periodDurationSeconds * timescale) / _duration) - 1;
                 }
                 for (let i = 0; i < _repeatCount; i++) {
                   currentTime += _duration;
                   const _mediaSegment = new MediaSegment();
                   varDic[DASH_TAGS.TemplateTime] = currentTime;
                   varDic[DASH_TAGS.TemplateNumber] = segNumber++;
-                  const _hashTime = mediaTemplate?.includes(
-                    DASH_TAGS.TemplateTime,
-                  );
+                  const _hashTime = mediaTemplate?.includes(DASH_TAGS.TemplateTime);
                   const _media = replaceVars(mediaTemplate!, varDic);
                   const _mediaUrl = combineUrl(segBaseUrl, _media);
                   _mediaSegment.url = _mediaUrl;
@@ -379,9 +331,7 @@ export class DashExtractor implements Extractor {
                   if (_hashTime) {
                     _mediaSegment.nameFromVar = currentTime.toString();
                   }
-                  streamSpec.playlist.mediaParts[0].mediaSegments.push(
-                    _mediaSegment,
-                  );
+                  streamSpec.playlist.mediaParts[0].mediaSegments.push(_mediaSegment);
                 }
                 currentTime += _duration;
               }
@@ -389,19 +339,14 @@ export class DashExtractor implements Extractor {
               const timescale = Number(timescaleStr);
               let startNumber = Number(startNumberStr);
               const duration = Number(durationStr);
-              let totalNumber = Math.ceil(
-                (periodDurationSeconds * timescale) / duration,
-              );
+              let totalNumber = Math.ceil((periodDurationSeconds * timescale) / duration);
               if (totalNumber === 0 && isLive) {
                 const now = Date.now();
                 const availableTime = new Date(availabilityStartTime!);
                 const offsetMs = Number(presentationTimeOffsetStr) / 1000;
-                availableTime.setUTCMilliseconds(
-                  availableTime.getUTCMilliseconds() + offsetMs,
-                );
+                availableTime.setUTCMilliseconds(availableTime.getUTCMilliseconds() + offsetMs);
                 const ts = (now - availableTime.getTime()) / 1000;
-                const updateTs =
-                  Temporal.Duration.from(timeShiftBufferDepth).total('seconds');
+                const updateTs = Temporal.Duration.from(timeShiftBufferDepth).total('seconds');
                 startNumber += ((ts - updateTs) * timescale) / duration;
                 totalNumber = (updateTs * timescale) / duration;
               }
@@ -412,9 +357,7 @@ export class DashExtractor implements Extractor {
                 index++, segIndex++
               ) {
                 varDic[DASH_TAGS.TemplateNumber] = index;
-                const hasNumber = mediaTemplate!.includes(
-                  DASH_TAGS.TemplateNumber,
-                );
+                const hasNumber = mediaTemplate!.includes(DASH_TAGS.TemplateNumber);
                 const media = replaceVars(mediaTemplate!, varDic);
                 const mediaUrl = combineUrl(segBaseUrl, media!);
                 const mediaSegment = new MediaSegment();
@@ -422,9 +365,7 @@ export class DashExtractor implements Extractor {
                 if (hasNumber) mediaSegment.nameFromVar = index.toString();
                 mediaSegment.index = isLive ? index : segIndex;
                 mediaSegment.duration = duration / timescale;
-                streamSpec.playlist.mediaParts[0].mediaSegments.push(
-                  mediaSegment,
-                );
+                streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
               }
             }
           }
@@ -437,8 +378,7 @@ export class DashExtractor implements Extractor {
             streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
           }
 
-          const adaptationSetProtections =
-            adaptationSet.getElementsByTagName('ContentProtection');
+          const adaptationSetProtections = adaptationSet.getElementsByTagName('ContentProtection');
           const representationProtections =
             representation.getElementsByTagName('ContentProtection');
           const contentProtections = representationProtections[0]
@@ -452,11 +392,9 @@ export class DashExtractor implements Extractor {
             const playreadySystemId = '9a04f079-9840-4286-ab92-e65be0885f95';
             for (const contentProtection of contentProtections) {
               const schemeIdUri = contentProtection.getAttribute('schemeIdUri');
-              const defaultKID =
-                contentProtection.getAttribute('cenc:default_KID') || undefined;
+              const defaultKID = contentProtection.getAttribute('cenc:default_KID') || undefined;
               const pssh =
-                contentProtection.getElementsByTagName('cenc:pssh')[0]
-                  ?.textContent || undefined;
+                contentProtection.getElementsByTagName('cenc:pssh')[0]?.textContent || undefined;
               const drmData = { keyId: defaultKID, pssh: pssh };
               if (schemeIdUri?.includes(widevineSystemId)) {
                 encryptInfo.drm.widevine = drmData;
@@ -489,26 +427,19 @@ export class DashExtractor implements Extractor {
               const url1 = streamList[_index]
                 .playlist!.mediaParts.at(-1)!
                 .mediaSegments.at(-1)!.url;
-              const url2 =
-                streamSpec.playlist.mediaParts[0].mediaSegments.at(-1)?.url;
+              const url2 = streamSpec.playlist.mediaParts[0].mediaSegments.at(-1)?.url;
               if (url1 !== url2) {
                 const startIndex =
-                  streamList[_index]
-                    .playlist!.mediaParts.at(-1)!
-                    .mediaSegments.at(-1)!.index + 1;
-                const segments =
-                  streamSpec.playlist.mediaParts[0].mediaSegments;
+                  streamList[_index].playlist!.mediaParts.at(-1)!.mediaSegments.at(-1)!.index + 1;
+                const segments = streamSpec.playlist.mediaParts[0].mediaSegments;
                 for (const segment of segments) {
                   segment.index += startIndex;
                 }
                 const mediaPart = new MediaPart();
-                mediaPart.mediaSegments =
-                  streamList[_index].playlist!.mediaParts[0].mediaSegments;
+                mediaPart.mediaSegments = streamList[_index].playlist!.mediaParts[0].mediaSegments;
                 streamList[_index].playlist!.mediaParts.push(mediaPart);
               } else {
-                streamList[_index]
-                  .playlist!.mediaParts.at(-1)!
-                  .mediaSegments.at(-1)!.duration +=
+                streamList[_index].playlist!.mediaParts.at(-1)!.mediaSegments.at(-1)!.duration +=
                   streamSpec.playlist.mediaParts[0].mediaSegments.reduce(
                     (sum, segment) => sum + segment.duration,
                     0,
@@ -516,10 +447,7 @@ export class DashExtractor implements Extractor {
               }
             }
           } else {
-            if (
-              streamSpec.mediaType === MEDIA_TYPES.SUBTITLES &&
-              streamSpec.extension === 'mp4'
-            ) {
+            if (streamSpec.mediaType === MEDIA_TYPES.SUBTITLES && streamSpec.extension === 'mp4') {
               streamSpec.extension = 'm4s';
             }
             if (
@@ -541,15 +469,9 @@ export class DashExtractor implements Extractor {
       }
     }
 
-    const audioList = streamList.filter(
-      (stream) => stream.mediaType === MEDIA_TYPES.AUDIO,
-    );
-    const subtitleList = streamList.filter(
-      (stream) => stream.mediaType === MEDIA_TYPES.SUBTITLES,
-    );
-    const videoList = streamList.filter(
-      (stream) => stream.mediaType === MEDIA_TYPES.VIDEO,
-    );
+    const audioList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.AUDIO);
+    const subtitleList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.SUBTITLES);
+    const videoList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.VIDEO);
 
     for (const video of videoList) {
       const audioGroupId = audioList
@@ -575,10 +497,7 @@ export class DashExtractor implements Extractor {
   async refreshPlayList(streamSpecs: StreamSpec[]): Promise<void> {
     if (!streamSpecs.length) return;
 
-    const response = await fetch(
-      this.#parserConfig.url,
-      this.#parserConfig.headers,
-    ).catch(() =>
+    const response = await fetch(this.#parserConfig.url, this.#parserConfig.headers).catch(() =>
       fetch(this.#parserConfig.originalUrl, this.#parserConfig.headers),
     );
     const rawText = await response.text();
@@ -589,13 +508,10 @@ export class DashExtractor implements Extractor {
 
     const newStreams = await this.extractStreams(rawText);
     for (const streamSpec of streamSpecs) {
-      let results = newStreams.filter(
-        (n) => n.toShortString() === streamSpec.toShortString(),
-      );
+      let results = newStreams.filter((n) => n.toShortString() === streamSpec.toShortString());
       if (!results.length) {
         results = newStreams.filter(
-          (n) =>
-            n.playlist?.mediaInit?.url === streamSpec.playlist?.mediaInit?.url,
+          (n) => n.playlist?.mediaInit?.url === streamSpec.playlist?.mediaInit?.url,
         );
       }
       if (results.length) {
@@ -636,17 +552,8 @@ export class DashExtractor implements Extractor {
 
   preProcessContent(): void {
     for (const processor of this.#parserConfig.contentProcessors) {
-      if (
-        processor.canProcess(
-          this.extractorType,
-          this.#mpdContent,
-          this.#parserConfig,
-        )
-      ) {
-        this.#mpdContent = processor.process(
-          this.#mpdContent,
-          this.#parserConfig,
-        );
+      if (processor.canProcess(this.extractorType, this.#mpdContent, this.#parserConfig)) {
+        this.#mpdContent = processor.process(this.#mpdContent, this.#parserConfig);
       }
     }
   }

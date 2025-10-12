@@ -15,9 +15,7 @@ export class EncryptInfo {
 
   parseMethod(method?: string | null): EncryptMethod {
     if (method) {
-      return ENCRYPT_METHODS[
-        method.replace('-', '_') as keyof typeof ENCRYPT_METHODS
-      ];
+      return ENCRYPT_METHODS[method.replace('-', '_') as keyof typeof ENCRYPT_METHODS];
     } else {
       return ENCRYPT_METHODS.UNKNOWN;
     }

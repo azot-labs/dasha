@@ -9,5 +9,4 @@ export const ENCRYPT_METHODS = {
   UNKNOWN: 'unknown',
 } as const;
 
-export type EncryptMethod =
-  (typeof ENCRYPT_METHODS)[keyof typeof ENCRYPT_METHODS];
+export type EncryptMethod = (typeof ENCRYPT_METHODS)[keyof typeof ENCRYPT_METHODS];
