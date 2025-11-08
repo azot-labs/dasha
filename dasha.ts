@@ -4,8 +4,9 @@ export * from './lib/shared/extractor-type';
 export * from './lib/shared/media-part';
 export * from './lib/shared/media-segment';
 export * from './lib/shared/media-type';
-export * from './lib/shared/stream-spec';
+export * from './lib/shared/playlist';
 export * from './lib/shared/role-type';
+export * from './lib/shared/stream-spec';
 
 export * from './lib/extractor';
 export * from './lib/parser-config';
