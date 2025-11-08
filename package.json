@@ -14,8 +14,8 @@
     "prepublishOnly": "npm run build"
   },
   "type": "module",
-  "main": "./dist/dasha.js",
-  "types": "./dist/dasha.d.ts",
+  "main": "./dist/dasha.mjs",
+  "types": "./dist/dasha.d.mts",
   "exports": {
     ".": {
       "require": {
@@ -23,8 +23,8 @@
         "default": "./dist/dasha.cjs"
       },
       "import": {
-        "types": "./dist/dasha.d.ts",
-        "default": "./dist/dasha.js"
+        "types": "./dist/dasha.d.mts",
+        "default": "./dist/dasha.mjs"
       }
     }
   },
