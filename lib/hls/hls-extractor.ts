@@ -1,10 +1,14 @@
 import { readFile } from 'node:fs/promises';
-import { MEDIA_TYPES } from '../shared/media-type';
 import { EXTRACTOR_TYPES, type ExtractorType } from '../shared/extractor-type';
 import { Extractor } from '../extractor';
 import { ParserConfig } from '../parser-config';
 import { HLS_TAGS } from '../hls/hls-tags';
-import { StreamSpec } from '../shared/stream-spec';
+import {
+  AudioStreamInfo,
+  MediaStreamInfo,
+  SubtitleStreamInfo,
+  VideoStreamInfo,
+} from '../shared/stream-info';
 import { combineUrl, distinctBy, getAttribute } from '../shared/util';
 import { Playlist } from '../shared/playlist';
 import { MediaPart } from '../shared/media-part';
@@ -60,69 +64,83 @@ export class HlsExtractor implements Extractor {
 
   async #parseMasterList() {
     this.#masterM3u8Flag = true;
-    const streams: StreamSpec[] = [];
+    const streamInfos: MediaStreamInfo[] = [];
     let expectPlaylist = false;
-    let streamSpec = new StreamSpec();
+    let streamInfo: MediaStreamInfo = new VideoStreamInfo();
     const lines = this.#m3u8Content.split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
       if (line.startsWith(HLS_TAGS.extXStreamInf)) {
-        streamSpec = new StreamSpec();
-        streamSpec.originalUrl = this.parserConfig.originalUrl;
+        streamInfo = new VideoStreamInfo();
+        streamInfo.originalUrl = this.parserConfig.originalUrl;
         const bandwidth =
           getAttribute(line, 'AVERAGE-BANDWIDTH') || getAttribute(line, 'BANDWIDTH');
-        streamSpec.bandwidth = Number(bandwidth || 0);
-        streamSpec.codecs = getAttribute(line, 'CODECS');
-        streamSpec.resolution = getAttribute(line, 'RESOLUTION');
+        streamInfo.bitrate = Number(bandwidth || 0);
+        streamInfo.codecs = getAttribute(line, 'CODECS');
+        const resolution = getAttribute(line, 'RESOLUTION');
+        const [widthString, heightString] = resolution.split('x');
+        streamInfo.width = parseInt(widthString);
+        streamInfo.height = parseInt(heightString);
+        streamInfo.resolution;
         const frameRate = getAttribute(line, 'FRAME-RATE');
-        if (frameRate) streamSpec.frameRate = Number(frameRate);
+        if (frameRate) streamInfo.frameRate = Number(frameRate);
         const audioId = getAttribute(line, 'AUDIO');
-        if (audioId) streamSpec.audioId = audioId;
+        if (audioId) streamInfo.audioId = audioId;
         const videoId = getAttribute(line, 'VIDEO');
-        if (videoId) streamSpec.videoId = videoId;
+        if (videoId) streamInfo.videoId = videoId;
         const subtitleId = getAttribute(line, 'SUBTITLES');
-        if (subtitleId) streamSpec.subtitleId = subtitleId;
+        if (subtitleId) streamInfo.subtitleId = subtitleId;
         const videoRange = getAttribute(line, 'VIDEO-RANGE');
-        if (videoRange) streamSpec.videoRange = videoRange;
-        if (streamSpec.codecs && streamSpec.audioId) {
-          streamSpec.codecs = streamSpec.codecs.split(',')[0];
+        if (videoRange) streamInfo.videoRange = videoRange;
+        if (streamInfo.codecs && streamInfo.audioId) {
+          streamInfo.codecs = streamInfo.codecs.split(',')[0];
         }
         expectPlaylist = true;
       } else if (line.startsWith(HLS_TAGS.extXMedia)) {
-        streamSpec = new StreamSpec();
-        const type = getAttribute(line, 'TYPE').replace('-', '_');
-        const mediaType = MEDIA_TYPES[type as keyof typeof MEDIA_TYPES];
-        if (mediaType) streamSpec.mediaType = mediaType;
-        if (mediaType === MEDIA_TYPES.CLOSED_CAPTIONS) continue;
+        streamInfo = new VideoStreamInfo();
+        const type = getAttribute(line, 'TYPE');
+        if (type === 'VIDEO') streamInfo = new VideoStreamInfo();
+        if (type === 'AUDIO') streamInfo = new AudioStreamInfo();
+        if (type === 'SUBTITLES') streamInfo = new SubtitleStreamInfo();
+        if (type === 'CLOSED-CAPTIONS') {
+          streamInfo = new SubtitleStreamInfo();
+          streamInfo.cc = true;
+          continue;
+        }
         let url = getAttribute(line, 'URI');
         if (!url) continue;
         url = combineUrl(this.#baseUrl, url);
-        streamSpec.url = this.preProcessUrl(url);
+        streamInfo.url = this.preProcessUrl(url);
         const groupId = getAttribute(line, 'GROUP-ID');
-        if (groupId) streamSpec.groupId = groupId;
+        if (groupId) streamInfo.groupId = groupId;
         const language = getAttribute(line, 'LANGUAGE');
-        if (language) streamSpec.language = language;
+        if (language) streamInfo.languageCode = language;
         const name = getAttribute(line, 'NAME');
-        if (name) streamSpec.name = name;
+        if (name) streamInfo.name = name;
         const defaultFlag = getAttribute(line, 'DEFAULT');
-        if (defaultFlag) streamSpec.default = defaultFlag.toLowerCase() === 'yes';
-        const channels = getAttribute(line, 'CHANNELS');
-        if (channels) streamSpec.channels = channels;
+        if (defaultFlag) streamInfo.default = defaultFlag.toLowerCase() === 'yes';
+        const channelsString = getAttribute(line, 'CHANNELS');
+        if (channelsString) {
+          streamInfo.channels = channelsString;
+          if (streamInfo.type === 'audio') {
+            streamInfo.numberOfChannels = parseFloat(channelsString);
+          }
+        }
         const characteristics = getAttribute(line, 'CHARACTERISTICS');
         if (characteristics) {
-          streamSpec.characteristics = characteristics.split(',').at(-1)?.split('.').at(-1);
+          streamInfo.characteristics = characteristics.split(',').at(-1)?.split('.').at(-1);
         }
-        streams.push(streamSpec);
+        streamInfos.push(streamInfo);
       } else if (line.startsWith('#')) {
         continue;
       } else if (expectPlaylist) {
         const url = combineUrl(this.#baseUrl, line);
-        streamSpec.url = this.preProcessUrl(url);
+        streamInfo.url = this.preProcessUrl(url);
         expectPlaylist = false;
-        streams.push(streamSpec);
+        streamInfos.push(streamInfo);
       }
     }
-    return streams;
+    return streamInfos;
   }
 
   async #parseList() {
@@ -301,7 +319,7 @@ export class HlsExtractor implements Extractor {
     throw new Error('No key processor found');
   }
 
-  async extractStreams(rawText: string): Promise<StreamSpec[]> {
+  async extractStreams(rawText: string): Promise<MediaStreamInfo[]> {
     this.#m3u8Content = rawText;
     this.preProcessContent();
     if (this.#m3u8Content.includes(HLS_TAGS.extXStreamInf)) {
@@ -309,7 +327,7 @@ export class HlsExtractor implements Extractor {
     }
 
     const playlist = await this.#parseList();
-    const streamSpec = new StreamSpec();
+    const streamSpec = new VideoStreamInfo();
     streamSpec.url = this.parserConfig.url;
     streamSpec.playlist = playlist;
     streamSpec.extension = playlist.mediaInit ? 'mp4' : 'ts';
@@ -344,7 +362,7 @@ export class HlsExtractor implements Extractor {
     this.preProcessContent();
   }
 
-  async #refreshUrlFromMaster(lists: StreamSpec[]) {
+  async #refreshUrlFromMaster(lists: MediaStreamInfo[]) {
     await this.#loadM3u8FromUrl(this.parserConfig.url);
     const newStreams = await this.#parseMasterList().then((lists) =>
       distinctBy(lists, (list) => list.url),
@@ -356,7 +374,7 @@ export class HlsExtractor implements Extractor {
     }
   }
 
-  async fetchPlayList(lists: StreamSpec[]): Promise<void> {
+  async fetchPlayList(lists: MediaStreamInfo[]): Promise<void> {
     for (const list of lists) {
       try {
         await this.#loadM3u8FromUrl(list.url!);
@@ -375,7 +393,7 @@ export class HlsExtractor implements Extractor {
         list.playlist = newPlaylist;
       }
 
-      if (list.mediaType === MEDIA_TYPES.SUBTITLES) {
+      if (list.type === 'subtitle') {
         const a = list.playlist.mediaParts.some((part) =>
           part.mediaSegments.some((segment) => segment.url.includes('.ttml')),
         );
@@ -392,7 +410,7 @@ export class HlsExtractor implements Extractor {
     }
   }
 
-  async refreshPlayList(streamSpecs: StreamSpec[]): Promise<void> {
-    await this.fetchPlayList(streamSpecs);
+  async refreshPlayList(streamInfos: MediaStreamInfo[]): Promise<void> {
+    await this.fetchPlayList(streamInfos);
   }
 }

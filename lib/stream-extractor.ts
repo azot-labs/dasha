@@ -7,7 +7,7 @@ import { ParserConfig } from './parser-config';
 import { Extractor } from './extractor';
 import { HLS_TAGS } from './hls/hls-tags';
 import { DashExtractor } from './dash/dash-extractor';
-import { StreamSpec } from './shared/stream-spec';
+import { MediaStreamInfo } from './shared/stream-info';
 import { HlsExtractor } from './hls/hls-extractor';
 
 export class StreamExtractor {
@@ -83,11 +83,11 @@ export class StreamExtractor {
     return this.#extractor.extractStreams(this.#rawText);
   }
 
-  async fetchPlayList(streamSpecs: StreamSpec[]): Promise<void> {
-    return this.#extractor.fetchPlayList(streamSpecs);
+  async fetchPlayList(streamInfos: MediaStreamInfo[]): Promise<void> {
+    return this.#extractor.fetchPlayList(streamInfos);
   }
 
-  async refreshPlayList(streamSpecs: StreamSpec[]): Promise<void> {
-    return this.#extractor.refreshPlayList(streamSpecs);
+  async refreshPlayList(streamInfos: MediaStreamInfo[]): Promise<void> {
+    return this.#extractor.refreshPlayList(streamInfos);
   }
 }

@@ -1,19 +1,65 @@
 import { Temporal } from 'temporal-polyfill';
-import { DOMParser, Element } from '@xmldom/xmldom';
+import { DOMParser, Element, LiveNodeList } from '@xmldom/xmldom';
 import { EXTRACTOR_TYPES, ExtractorType } from '../shared/extractor-type';
 import { ParserConfig } from '../parser-config';
 import { ENCRYPT_METHODS, EncryptMethod } from '../shared/encrypt-method';
-import { StreamSpec } from '../shared/stream-spec';
+import {
+  AudioStreamInfo,
+  MediaStreamInfo,
+  SubtitleStreamInfo,
+  VideoStreamInfo,
+} from '../shared/stream-info';
 import { Extractor } from '../extractor';
 import { combineUrl, replaceVars } from '../shared/util';
 import { Playlist } from '../shared/playlist';
 import { MediaPart } from '../shared/media-part';
-import { MEDIA_TYPES } from '../shared/media-type';
 import { ROLE_TYPE } from '../shared/role-type';
 import { MediaSegment } from '../shared/media-segment';
 import { DASH_TAGS } from './dash-tags';
 import { EncryptInfo } from '../shared/encrypt-info';
 import { parseRange } from './dash-utils';
+import { parseDynamicRange, tryParseVideoCodec } from './dash-video';
+import { checkIsClosedCaption, checkIsSdh, tryParseSubtitleCodec } from './dash-subtitle';
+import {
+  checkIsDescriptive,
+  getDolbyDigitalPlusComplexityIndex,
+  parseChannels,
+  tryParseAudioCodec,
+} from './dash-audio';
+import { pipe } from '../shared/pipe';
+
+const getStreamInfoByCodecs = (codecs: string): MediaStreamInfo => {
+  const videoCodec = tryParseVideoCodec(codecs);
+  if (videoCodec) return new VideoStreamInfo({ codec: videoCodec });
+  const audioCodec = tryParseAudioCodec(codecs);
+  if (audioCodec) return new AudioStreamInfo({ codec: audioCodec });
+  const subtitleCodec = tryParseSubtitleCodec(codecs);
+  if (subtitleCodec) return new SubtitleStreamInfo({ codec: subtitleCodec });
+  return new VideoStreamInfo();
+};
+
+const selectNonEmpty = (args: { tag: string; elements: Element[] }) => {
+  for (const element of args.elements) {
+    const results = element.getElementsByTagName(args.tag);
+    if (results.length) return results;
+  }
+};
+
+const toSchemeValueArray = (elements?: LiveNodeList<Element>) => {
+  const results: { schemeIdUri: string; value?: string }[] = [];
+  if (!elements) return results;
+  for (const element of elements) {
+    const schemeIdUri = element.getAttribute('schemeIdUri')!;
+    const value = element.getAttribute('value')!;
+    results.push({ schemeIdUri, value });
+  }
+  return results;
+};
+
+const getTagAttrs = (tag: string, ...elements: Element[]) => {
+  const adapter = pipe(selectNonEmpty, toSchemeValueArray);
+  return adapter({ tag, elements });
+};
 
 export class DashExtractor implements Extractor {
   static #DEFAULT_METHOD: EncryptMethod = ENCRYPT_METHODS.CENC;
@@ -52,8 +98,8 @@ export class DashExtractor implements Extractor {
     return Number(d.toFixed(3));
   }
 
-  async extractStreams(rawText: string): Promise<StreamSpec[]> {
-    const streamList: StreamSpec[] = [];
+  async extractStreams(rawText: string): Promise<MediaStreamInfo[]> {
+    const streamInfos: MediaStreamInfo[] = [];
 
     this.#mpdContent = rawText;
 
@@ -62,7 +108,7 @@ export class DashExtractor implements Extractor {
     const type = mpdElement.getAttribute('type');
     const isLive = type === 'dynamic';
 
-    const maxSegmentDuration = mpdElement.getAttribute('maxSegmentDuration');
+    // const maxSegmentDuration = mpdElement.getAttribute('maxSegmentDuration');
     const availabilityStartTime = mpdElement.getAttribute('availabilityStartTime');
     const timeShiftBufferDepth = mpdElement.getAttribute('timeShiftBufferDepth') || 'PT1M';
     const publishTime = mpdElement.getAttribute('publishTime');
@@ -103,83 +149,114 @@ export class DashExtractor implements Extractor {
               representation.getAttribute('mimeType') ||
               '';
           }
-          const bandwidth = representation.getAttribute('bandwidth');
-          const streamSpec = new StreamSpec();
-          streamSpec.originalUrl = this.#parserConfig.originalUrl;
-          streamSpec.periodId = periodId;
-          streamSpec.playlist = new Playlist();
-          streamSpec.playlist.mediaParts.push(new MediaPart());
-          streamSpec.groupId = representation.getAttribute('id');
-          streamSpec.bandwidth = Number(bandwidth || 0);
-          streamSpec.codecs =
-            representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs');
-          streamSpec.language = this.#filterLanguage(
+
+          const codecParameterString =
+            representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs')!;
+          const widthParameterString = representation.getAttribute('width');
+          const heightParameterString = representation.getAttribute('height');
+
+          const roles = getTagAttrs('Role', representation, adaptationSet);
+          const supplementalProps = getTagAttrs(
+            'SupplementalProperty',
+            representation,
+            adaptationSet,
+          );
+          const essentialProps = getTagAttrs('EssentialProperty', representation, adaptationSet);
+          const accessibilities = getTagAttrs('Accessibility', representation, adaptationSet);
+          const audioChannelConfigs = getTagAttrs(
+            'AudioChannelConfiguration',
+            adaptationSet,
+            representation,
+          );
+          const channelsString = audioChannelConfigs[0]?.value;
+
+          let streamInfo = getStreamInfoByCodecs(codecParameterString) ?? new VideoStreamInfo();
+
+          const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
+
+          streamInfo.languageCode = this.#filterLanguage(
             representation.getAttribute('lang') || adaptationSet.getAttribute('lang'),
           );
-          streamSpec.frameRate = frameRate || this.#getFrameRate(representation);
-          const width = representation.getAttribute('width');
-          const height = representation.getAttribute('height');
-          streamSpec.resolution = width && height ? `${width}x${height}` : undefined;
-          streamSpec.url = this.#mpdUrl;
-          const mimeTypePart = mimeType.split('/')[0];
-          if (mimeTypePart === 'text') {
-            streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
-          } else if (mimeTypePart === 'audio') {
-            streamSpec.mediaType = MEDIA_TYPES.AUDIO;
-          } else if (mimeTypePart === 'video' || !!streamSpec.resolution) {
-            streamSpec.mediaType = MEDIA_TYPES.VIDEO;
+
+          if (streamInfo.type === 'video') {
+            streamInfo.bitrate = bitrate;
+            streamInfo.width = Number(widthParameterString);
+            streamInfo.height = Number(heightParameterString);
+            streamInfo.frameRate = frameRate || this.#getFrameRate(representation);
+            if (supplementalProps && essentialProps) {
+              streamInfo.dynamicRange = parseDynamicRange(
+                codecParameterString,
+                supplementalProps,
+                essentialProps,
+              );
+            }
+          } else if (streamInfo.type === 'audio') {
+            streamInfo.bitrate = bitrate;
+            if (accessibilities) {
+              streamInfo.descriptive = checkIsDescriptive(accessibilities);
+            }
+            if (supplementalProps) {
+              streamInfo.joc = getDolbyDigitalPlusComplexityIndex(supplementalProps);
+            }
+            if (channelsString) {
+              streamInfo.numberOfChannels = parseChannels(channelsString);
+              streamInfo.channels = channelsString;
+            }
+          } else if (streamInfo.type === 'subtitle') {
+            if (roles) {
+              streamInfo.cc = checkIsClosedCaption(roles);
+            }
+            if (accessibilities) {
+              streamInfo.sdh = checkIsSdh(accessibilities);
+            }
           }
+
+          streamInfo.url = this.#mpdUrl;
+          streamInfo.originalUrl = this.#parserConfig.originalUrl;
+          streamInfo.playlist = new Playlist();
+          streamInfo.playlist.mediaParts.push(new MediaPart());
+
+          streamInfo.periodId = periodId;
+          streamInfo.groupId = representation.getAttribute('id');
+          streamInfo.codecs =
+            representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs');
 
           const volumeAdjust = representation.getAttribute('volumeAdjust');
           if (volumeAdjust) {
-            streamSpec.groupId = streamSpec.groupId + '-' + volumeAdjust;
+            streamInfo.groupId = streamInfo.groupId + '-' + volumeAdjust;
           }
 
           const mType =
             representation.getAttribute('mimeType') || adaptationSet.getAttribute('mimeType');
           if (mType) {
             const mTypeSplit = mType.split('/');
-            streamSpec.extension = mTypeSplit.length === 2 ? mTypeSplit[1] : null;
+            streamInfo.extension = mTypeSplit.length === 2 ? mTypeSplit[1] : null;
           }
 
-          if (streamSpec.codecs === 'stpp' || streamSpec.codecs === 'wvtt') {
-            streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
-          }
-
-          const role =
-            representation.getElementsByTagName('Role')[0] ||
-            adaptationSet.getElementsByTagName('Role')[0];
+          const role = roles?.[0];
           if (role) {
-            const roleValue = role.getAttribute('value');
+            const roleValue = role.value;
             const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
             const roleTypeKey = roleValue!.split('-').map(capitalize).join('');
             const roleType = ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
-            streamSpec.role = roleType;
-            if (roleType === ROLE_TYPE.Subtitle) {
-              streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
-              if (mType?.includes('ttml')) streamSpec.extension = 'ttml';
-            } else if (roleType === ROLE_TYPE.ForcedSubtitle) {
-              streamSpec.mediaType = MEDIA_TYPES.SUBTITLES;
-            }
+            streamInfo.role = roleType;
+            // if (roleType === ROLE_TYPE.Subtitle) {
+            //   streamInfo.type = 'subtitle';
+            //   if (mType?.includes('ttml')) streamInfo.extension = 'ttml';
+            // } else if (roleType === ROLE_TYPE.ForcedSubtitle) {
+            //   streamInfo.type = 'subtitle';
+            // }
           }
 
-          streamSpec.playlist.isLive = isLive;
+          streamInfo.playlist.isLive = isLive;
 
           if (timeShiftBufferDepth) {
-            streamSpec.playlist.refreshIntervalMs =
+            streamInfo.playlist.refreshIntervalMs =
               Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2;
           }
 
-          const audioChannelConfiguration =
-            adaptationSet.getElementsByTagName('AudioChannelConfiguration')[0] ||
-            representation.getElementsByTagName('AudioChannelConfiguration')[0];
-
-          if (audioChannelConfiguration) {
-            streamSpec.channels = audioChannelConfiguration.getAttribute('value');
-          }
-
           if (publishTime) {
-            streamSpec.publishTime = new Date(publishTime);
+            streamInfo.publishTime = new Date(publishTime);
           }
 
           const segmentBaseElement = representation.getElementsByTagName('SegmentBase')[0];
@@ -192,7 +269,7 @@ export class DashExtractor implements Extractor {
                 mediaSegment.index = 0;
                 mediaSegment.url = segBaseUrl;
                 mediaSegment.duration = periodDurationSeconds;
-                streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
+                streamInfo.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
               } else {
                 const initUrl = combineUrl(segBaseUrl, sourceUrl);
                 const initRange = initialization.getAttribute('range');
@@ -204,7 +281,7 @@ export class DashExtractor implements Extractor {
                   initSegment.startRange = start;
                   initSegment.expectLength = expect;
                 }
-                streamSpec.playlist.mediaInit = initSegment;
+                streamInfo.playlist.mediaInit = initSegment;
               }
             }
           }
@@ -225,7 +302,7 @@ export class DashExtractor implements Extractor {
                 initSegment.startRange = start;
                 initSegment.expectLength = expect;
               }
-              streamSpec.playlist.mediaInit = initSegment;
+              streamInfo.playlist.mediaInit = initSegment;
             }
 
             const segmentUrls = segmentList.getElementsByTagName('SegmentURL');
@@ -245,7 +322,7 @@ export class DashExtractor implements Extractor {
                 segment.startRange = start;
                 segment.expectLength = expect;
               }
-              streamSpec.playlist.mediaParts[0].mediaSegments.push(segment);
+              streamInfo.playlist.mediaParts[0].mediaSegments.push(segment);
             }
           }
 
@@ -257,8 +334,8 @@ export class DashExtractor implements Extractor {
             const segmentTemplateOuter =
               segmentTemplateElementsOuter[0] || segmentTemplateElements[0];
             const varDic: Record<string, any> = {};
-            varDic[DASH_TAGS.TemplateRepresentationID] = streamSpec.groupId;
-            varDic[DASH_TAGS.TemplateBandwidth] = bandwidth;
+            varDic[DASH_TAGS.TemplateRepresentationID] = streamInfo.groupId;
+            varDic[DASH_TAGS.TemplateBandwidth] = bitrate;
             const presentationTimeOffsetStr =
               segmentTemplate.getAttribute('presentationTimeOffset') ||
               segmentTemplateOuter.getAttribute('presentationTimeOffset') ||
@@ -283,7 +360,7 @@ export class DashExtractor implements Extractor {
               const mediaSegment = new MediaSegment();
               mediaSegment.index = -1;
               mediaSegment.url = initUrl;
-              streamSpec.playlist.mediaInit = mediaSegment;
+              streamInfo.playlist.mediaInit = mediaSegment;
             }
             const mediaTemplate =
               segmentTemplate.getAttribute('media') || segmentTemplateOuter.getAttribute('media');
@@ -313,7 +390,7 @@ export class DashExtractor implements Extractor {
                 }
                 mediaSegment.duration = _duration / timescale;
                 mediaSegment.index = segIndex++;
-                streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
+                streamInfo.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
                 if (_repeatCount < 0) {
                   _repeatCount = Math.ceil((periodDurationSeconds * timescale) / _duration) - 1;
                 }
@@ -331,7 +408,7 @@ export class DashExtractor implements Extractor {
                   if (_hashTime) {
                     _mediaSegment.nameFromVar = currentTime.toString();
                   }
-                  streamSpec.playlist.mediaParts[0].mediaSegments.push(_mediaSegment);
+                  streamInfo.playlist.mediaParts[0].mediaSegments.push(_mediaSegment);
                 }
                 currentTime += _duration;
               }
@@ -365,17 +442,17 @@ export class DashExtractor implements Extractor {
                 if (hasNumber) mediaSegment.nameFromVar = index.toString();
                 mediaSegment.index = isLive ? index : segIndex;
                 mediaSegment.duration = duration / timescale;
-                streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
+                streamInfo.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
               }
             }
           }
 
-          if (streamSpec.playlist.mediaParts[0].mediaSegments.length === 0) {
+          if (streamInfo.playlist.mediaParts[0].mediaSegments.length === 0) {
             const mediaSegment = new MediaSegment();
             mediaSegment.index = 0;
             mediaSegment.url = segBaseUrl;
             mediaSegment.duration = periodDurationSeconds;
-            streamSpec.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
+            streamInfo.playlist.mediaParts[0].mediaSegments.push(mediaSegment);
           }
 
           const adaptationSetProtections = adaptationSet.getElementsByTagName('ContentProtection');
@@ -405,62 +482,64 @@ export class DashExtractor implements Extractor {
               }
             }
 
-            if (streamSpec.playlist.mediaInit) {
-              streamSpec.playlist.mediaInit.encryptInfo = encryptInfo;
+            if (streamInfo.playlist.mediaInit) {
+              streamInfo.playlist.mediaInit.encryptInfo = encryptInfo;
             }
-            const segments = streamSpec.playlist.mediaParts[0].mediaSegments;
+            const segments = streamInfo.playlist.mediaParts[0].mediaSegments;
             for (const segment of segments) {
               if (!segment.encryptInfo) segment.encryptInfo = encryptInfo;
             }
           }
 
-          const _index = streamList.findIndex(
+          const _index = streamInfos.findIndex(
             (item) =>
-              item.periodId !== streamSpec.periodId &&
-              item.groupId === streamSpec.groupId &&
-              item.resolution === streamSpec.resolution &&
-              item.mediaType === streamSpec.mediaType,
+              item.type === streamInfo.type &&
+              item.periodId !== streamInfo.periodId &&
+              item.groupId === streamInfo.groupId &&
+              (item.type === 'video' && streamInfo.type === 'video'
+                ? item.width === streamInfo.width && item.height === streamInfo.height
+                : true),
           );
           if (_index > -1) {
             if (isLive) {
             } else {
-              const url1 = streamList[_index]
+              const url1 = streamInfos[_index]
                 .playlist!.mediaParts.at(-1)!
                 .mediaSegments.at(-1)!.url;
-              const url2 = streamSpec.playlist.mediaParts[0].mediaSegments.at(-1)?.url;
+              const url2 = streamInfo.playlist.mediaParts[0].mediaSegments.at(-1)?.url;
               if (url1 !== url2) {
                 const startIndex =
-                  streamList[_index].playlist!.mediaParts.at(-1)!.mediaSegments.at(-1)!.index + 1;
-                const segments = streamSpec.playlist.mediaParts[0].mediaSegments;
+                  streamInfos[_index].playlist!.mediaParts.at(-1)!.mediaSegments.at(-1)!.index + 1;
+                const segments = streamInfo.playlist.mediaParts[0].mediaSegments;
                 for (const segment of segments) {
                   segment.index += startIndex;
                 }
                 const mediaPart = new MediaPart();
-                mediaPart.mediaSegments = streamList[_index].playlist!.mediaParts[0].mediaSegments;
-                streamList[_index].playlist!.mediaParts.push(mediaPart);
+                mediaPart.mediaSegments = streamInfos[_index].playlist!.mediaParts[0].mediaSegments;
+                streamInfos[_index].playlist!.mediaParts.push(mediaPart);
               } else {
-                streamList[_index].playlist!.mediaParts.at(-1)!.mediaSegments.at(-1)!.duration +=
-                  streamSpec.playlist.mediaParts[0].mediaSegments.reduce(
+                streamInfos[_index].playlist!.mediaParts.at(-1)!.mediaSegments.at(-1)!.duration +=
+                  streamInfo.playlist.mediaParts[0].mediaSegments.reduce(
                     (sum, segment) => sum + segment.duration,
                     0,
                   );
               }
             }
           } else {
-            if (streamSpec.mediaType === MEDIA_TYPES.SUBTITLES && streamSpec.extension === 'mp4') {
-              streamSpec.extension = 'm4s';
+            if (streamInfo.type === 'subtitle' && streamInfo.extension === 'mp4') {
+              streamInfo.extension = 'm4s';
             }
             if (
-              streamSpec.mediaType !== MEDIA_TYPES.SUBTITLES &&
-              (streamSpec.extension == null ||
-                streamSpec.playlist.mediaParts.reduce(
+              streamInfo.type !== 'subtitle' &&
+              (streamInfo.extension == null ||
+                streamInfo.playlist.mediaParts.reduce(
                   (sum, part) => sum + part.mediaSegments.length,
                   0,
                 ) > 1)
             ) {
-              streamSpec.extension = 'm4s';
+              streamInfo.extension = 'm4s';
             }
-            streamList.push(streamSpec);
+            streamInfos.push(streamInfo);
           }
 
           segBaseUrl = representationsBaseUrl;
@@ -469,22 +548,22 @@ export class DashExtractor implements Extractor {
       }
     }
 
-    const audioList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.AUDIO);
-    const subtitleList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.SUBTITLES);
-    const videoList = streamList.filter((stream) => stream.mediaType === MEDIA_TYPES.VIDEO);
+    const audioList = streamInfos.filter((stream) => stream.type === 'audio');
+    const subtitleList = streamInfos.filter((stream) => stream.type === 'subtitle');
+    const videoList = streamInfos.filter((stream) => stream.type === 'video');
 
     for (const video of videoList) {
       const audioGroupId = audioList
-        .toSorted((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))
+        .toSorted((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
         .at(0)?.groupId;
       const subtitleGroupId = subtitleList
-        .toSorted((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))
+        .toSorted((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
         .at(0)?.groupId;
       if (audioGroupId) video.audioId = audioGroupId;
       if (subtitleGroupId) video.subtitleId = subtitleGroupId;
     }
 
-    return streamList;
+    return streamInfos;
   }
 
   #filterLanguage(v?: string | null): string | undefined {
@@ -494,8 +573,8 @@ export class DashExtractor implements Extractor {
     return v;
   }
 
-  async refreshPlayList(streamSpecs: StreamSpec[]): Promise<void> {
-    if (!streamSpecs.length) return;
+  async refreshPlayList(streamInfos: MediaStreamInfo[]): Promise<void> {
+    if (!streamInfos.length) return;
 
     const response = await fetch(this.#parserConfig.url, this.#parserConfig.headers).catch(() =>
       fetch(this.#parserConfig.originalUrl, this.#parserConfig.headers),
@@ -507,23 +586,23 @@ export class DashExtractor implements Extractor {
     this.#setInitUrl();
 
     const newStreams = await this.extractStreams(rawText);
-    for (const streamSpec of streamSpecs) {
-      let results = newStreams.filter((n) => n.toShortString() === streamSpec.toShortString());
+    for (const streamInfo of streamInfos) {
+      let results = newStreams.filter((n) => n.toShortString() === streamInfo.toShortString());
       if (!results.length) {
         results = newStreams.filter(
-          (n) => n.playlist?.mediaInit?.url === streamSpec.playlist?.mediaInit?.url,
+          (n) => n.playlist?.mediaInit?.url === streamInfo.playlist?.mediaInit?.url,
         );
       }
       if (results.length) {
-        streamSpec.playlist!.mediaParts = results.at(0)!.playlist!.mediaParts;
+        streamInfo.playlist!.mediaParts = results.at(0)!.playlist!.mediaParts;
       }
     }
 
-    await this.#processUrl(streamSpecs);
+    await this.#processUrl(streamInfos);
   }
 
-  async #processUrl(streamSpecs: StreamSpec[]): Promise<void> {
-    for (const spec of streamSpecs) {
+  async #processUrl(streamInfos: MediaStreamInfo[]): Promise<void> {
+    for (const spec of streamInfos) {
       const playlist = spec.playlist;
       if (!playlist) continue;
       if (playlist.mediaInit) {
@@ -537,8 +616,8 @@ export class DashExtractor implements Extractor {
     }
   }
 
-  async fetchPlayList(streamSpecs: StreamSpec[]): Promise<void> {
-    this.#processUrl(streamSpecs);
+  async fetchPlayList(streamInfos: MediaStreamInfo[]): Promise<void> {
+    this.#processUrl(streamInfos);
   }
 
   preProcessUrl(url: string): string {

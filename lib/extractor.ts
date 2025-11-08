@@ -1,13 +1,13 @@
 import { ExtractorType } from './shared/extractor-type';
-import { StreamSpec } from './shared/stream-spec';
+import { MediaStreamInfo } from './shared/stream-info';
 
 export interface Extractor {
   extractorType: ExtractorType;
 
-  extractStreams(rawText: string): Promise<StreamSpec[]>;
+  extractStreams(rawText: string): Promise<MediaStreamInfo[]>;
 
-  fetchPlayList(streamSpecs: StreamSpec[]): Promise<void>;
-  refreshPlayList(streamSpecs: StreamSpec[]): Promise<void>;
+  fetchPlayList(streamInfos: MediaStreamInfo[]): Promise<void>;
+  refreshPlayList(streamInfos: MediaStreamInfo[]): Promise<void>;
 
   preProcessUrl(url: string): string;
 

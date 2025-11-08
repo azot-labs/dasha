@@ -62,3 +62,9 @@ export const distinctBy = <T>(array: T[], callbackfn: (item: T) => unknown) => {
     return true;
   });
 };
+
+export const parseMimes = (codecs: string) =>
+  codecs
+    .toLowerCase()
+    .split(',')
+    .map((codec) => codec.trim().split('.')[0]);
