@@ -81,7 +81,7 @@ export class HlsExtractor implements Extractor {
         const [widthString, heightString] = resolution.split('x');
         streamInfo.width = parseInt(widthString);
         streamInfo.height = parseInt(heightString);
-        streamInfo.resolution;
+        streamInfo.resolution = resolution;
         const frameRate = getAttribute(line, 'FRAME-RATE');
         if (frameRate) streamInfo.frameRate = Number(frameRate);
         const audioId = getAttribute(line, 'AUDIO');

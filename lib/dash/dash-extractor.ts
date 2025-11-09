@@ -170,7 +170,7 @@ export class DashExtractor implements Extractor {
           );
           const channelsString = audioChannelConfigs[0]?.value;
 
-          let streamInfo = getStreamInfoByCodecs(codecParameterString) ?? new VideoStreamInfo();
+          const streamInfo = getStreamInfoByCodecs(codecParameterString) ?? new VideoStreamInfo();
 
           const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
 
