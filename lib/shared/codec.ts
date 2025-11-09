@@ -37,8 +37,8 @@ export const AUDIO_CODECS = [
   'vorbis', // https://wiki.x266.mov/docs/audio/Vorbis
   'flac', // https://wiki.x266.mov/docs/audio/FLAC
   'alac', // https://wiki.x266.mov/docs/audio/ALAC
-  'dd', // https://wiki.x266.mov/docs/audio/Dolby
-  'dd+', // https://wiki.x266.mov/docs/audio/Dolby#e-ac-3
+  'ac3', // https://wiki.x266.mov/docs/audio/Dolby
+  'eac3', // https://wiki.x266.mov/docs/audio/Dolby#e-ac-3
   'dts',
 ] as const;
 

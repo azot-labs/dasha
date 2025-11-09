@@ -7,9 +7,9 @@ const parseAudioCodecFromMime = (mime: string): AudioCodec => {
     case 'mp4a':
       return 'aac';
     case 'ac-3':
-      return 'dd';
+      return 'ac3';
     case 'ec-3':
-      return 'dd+';
+      return 'eac3';
     case 'opus':
       return 'opus';
     case 'dtsc':
