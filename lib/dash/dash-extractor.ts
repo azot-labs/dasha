@@ -101,10 +101,11 @@ export class DashExtractor implements Extractor {
   }
 
   #extendBaseUrl(node: Element, baseUrl: string) {
-    const target = node.getElementsByTagName('BaseURL')[0];
-    if (target?.textContent) {
-      return combineUrl(baseUrl, target.textContent);
-    }
+    const targets = node
+      .getElementsByTagName('BaseURL')
+      .filter((n) => !!n.parentNode?.isSameNode(node));
+    const target = targets[0];
+    if (target?.textContent) return combineUrl(baseUrl, target.textContent);
     return baseUrl;
   }
 
