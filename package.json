@@ -1,6 +1,6 @@
 {
   "name": "dasha",
-  "version": "4.0.0-alpha.7",
+  "version": "4.0.0-alpha.8",
   "description": "Streaming manifest parser",
   "files": [
     "dist"
