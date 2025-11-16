@@ -28,14 +28,31 @@ import {
 } from './dash-audio';
 import { pipe } from '../shared/pipe';
 
-const getStreamInfoByCodecs = (codecs: string): MediaStreamInfo => {
-  const videoCodec = tryParseVideoCodec(codecs);
-  if (videoCodec) return new VideoStreamInfo({ codec: videoCodec });
-  const audioCodec = tryParseAudioCodec(codecs);
-  if (audioCodec) return new AudioStreamInfo({ codec: audioCodec });
-  const subtitleCodec = tryParseSubtitleCodec(codecs);
-  if (subtitleCodec) return new SubtitleStreamInfo({ codec: subtitleCodec });
-  return new VideoStreamInfo();
+const createMediaStreamInfo = (params: {
+  codecs: string | null;
+  contentType: string | null;
+  mimeType: string | null;
+}): MediaStreamInfo => {
+  const shouldUseCodecsFromMime =
+    params.contentType === 'text' && !params.mimeType?.includes('mp4');
+  const codecs = shouldUseCodecsFromMime ? params.mimeType?.split('/')[1] : params.codecs;
+  if (!params.codecs && codecs) params.codecs = codecs;
+
+  if (params.codecs) {
+    const videoCodec = tryParseVideoCodec(params.codecs);
+    if (videoCodec) return new VideoStreamInfo({ codec: videoCodec });
+    const audioCodec = tryParseAudioCodec(params.codecs);
+    if (audioCodec) return new AudioStreamInfo({ codec: audioCodec });
+    const subtitleCodec = tryParseSubtitleCodec(params.codecs);
+    if (subtitleCodec) return new SubtitleStreamInfo({ codec: subtitleCodec });
+  } else {
+    const type = params.contentType || params.mimeType?.split('/')[0];
+    if (type === 'video') return new VideoStreamInfo();
+    if (type === 'audio') return new AudioStreamInfo();
+    if (type === 'text') return new SubtitleStreamInfo();
+  }
+
+  throw new Error('Unable to determine the type of a track, cannot continue...');
 };
 
 const selectNonEmpty = (args: { tag: string; elements: Element[] }) => {
@@ -137,20 +154,21 @@ export class DashExtractor implements Extractor {
       for (const adaptationSet of adaptationSets) {
         segBaseUrl = this.#extendBaseUrl(adaptationSet, segBaseUrl);
         const representationsBaseUrl = segBaseUrl;
-        let mimeType =
-          adaptationSet.getAttribute('contentType') || adaptationSet.getAttribute('mimeType');
+        let contentType = adaptationSet.getAttribute('contentType');
+        let mimeType = adaptationSet.getAttribute('mimeType');
         const frameRate = this.#getFrameRate(adaptationSet);
         const representations = adaptationSet.getElementsByTagName('Representation');
         for (const representation of representations) {
           segBaseUrl = this.#extendBaseUrl(representation, segBaseUrl);
+
+          if (!contentType) {
+            contentType = representation.getAttribute('contentType');
+          }
           if (!mimeType) {
-            mimeType =
-              representation.getAttribute('contentType') ||
-              representation.getAttribute('mimeType') ||
-              '';
+            mimeType = representation.getAttribute('mimeType');
           }
 
-          const codecParameterString =
+          const codecs =
             representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs')!;
           const widthParameterString = representation.getAttribute('width');
           const heightParameterString = representation.getAttribute('height');
@@ -170,7 +188,7 @@ export class DashExtractor implements Extractor {
           );
           const channelsString = audioChannelConfigs[0]?.value;
 
-          const streamInfo = getStreamInfoByCodecs(codecParameterString) ?? new VideoStreamInfo();
+          const streamInfo = createMediaStreamInfo({ codecs, contentType, mimeType });
 
           const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
 
@@ -185,7 +203,7 @@ export class DashExtractor implements Extractor {
             streamInfo.frameRate = frameRate || this.#getFrameRate(representation);
             if (supplementalProps && essentialProps) {
               streamInfo.dynamicRange = parseDynamicRange(
-                codecParameterString,
+                codecs,
                 supplementalProps,
                 essentialProps,
               );
@@ -218,8 +236,7 @@ export class DashExtractor implements Extractor {
 
           streamInfo.periodId = periodId;
           streamInfo.groupId = representation.getAttribute('id');
-          streamInfo.codecs =
-            representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs');
+          streamInfo.codecs = codecs;
 
           const volumeAdjust = representation.getAttribute('volumeAdjust');
           if (volumeAdjust) {
