@@ -2,42 +2,35 @@ import { expect, test } from 'vitest';
 import { StreamExtractor } from '../lib/stream-extractor';
 import { ParserConfig } from '../lib/parser-config';
 import { load } from './utils';
+import { DashExtractor } from '../lib/dash/dash-extractor';
 
 test('parse axinom mpd from text', async () => {
   const { text, url } = await load('axinom-1.mpd');
 
   const parseConfig = new ParserConfig();
-  const streamExtractor = new StreamExtractor(parseConfig);
-  await streamExtractor.loadSourceFromText(text, url);
-  const streams = await streamExtractor.extractStreams();
+  parseConfig.originalUrl = url!;
+  const extractor = new DashExtractor(parseConfig);
+  const streamInfos = await extractor.extractStreams(text);
 
-  const videos = streams.filter((stream) => stream.type === 'video');
-  expect(videos.length).toBe(10);
-  for (const video of videos) {
-    const segmentsCount = video.playlist?.mediaParts[0]?.mediaSegments?.length;
-    expect(segmentsCount).toBe(184);
-  }
-  videos.sort((a, b) => b.bitrate! - a.bitrate!);
-  const largestVideo = videos.at(0);
-  expect(largestVideo?.bitrate).toBe(2723012);
-  expect(largestVideo?.codecs).toBe('avc1.640033');
-  const smallestVideo = videos.at(-1);
-  expect(smallestVideo?.bitrate).toBe(386437);
-  expect(smallestVideo?.codecs).toBe('avc1.64001f');
+  expect(streamInfos).not.toBeNullable();
+  expect(streamInfos.length).toBe(23);
 
-  const audios = streams.filter((stream) => stream.type === 'audio');
-  expect(audios.length).toBe(3);
+  const first = streamInfos.at(0);
+  console.log(first?.toShortString());
+  expect(first?.toShortString()).toBe(
+    'Vid | 512x288 | 386 Kbps | 1 | avc | 184 segments | Main | ~12m16s',
+  );
+  expect(first?.audioId).toBe('15');
+  expect(first?.bitrate).toBe(386437);
+  expect(first?.languageCode).toBe('und');
+  expect(first?.subtitleId).toBe('25');
 
-  const subtitles = streams.filter((stream) => stream.type === 'subtitle');
-  expect(subtitles.length).toBe(10);
-
-  const firstVideoTrack = streams.find((stream) => stream.type === 'video');
-  const firstVideoSegment = firstVideoTrack?.playlist?.mediaParts[0]?.mediaSegments[0];
-  expect(firstVideoSegment?.url).toBe(url?.replace('Manifest_1080p.mpd', '1/0001.m4s'));
-
-  const firstSubtitleTrack = streams.find((stream) => stream.type === 'subtitle');
-  expect(firstSubtitleTrack?.codecs, 'wvtt');
-  expect(firstSubtitleTrack?.languageCode, 'ru');
+  expect(first?.playlist).not.toBeNullable();
+  expect(first?.playlist?.isLive).toBeFalsy();
+  expect(first?.playlist?.totalDuration).toBe(736);
+  expect(first?.playlist?.mediaInit).not.toBeNullable();
+  expect(first?.playlist?.mediaInit?.url).toBe('1/init.mp4');
+  expect(first?.playlist?.mediaParts[0]?.mediaSegments[0]?.url).toBe('1/0001.m4s');
 });
 
 test('parse axinom mpd with drm from text', async () => {
@@ -45,7 +38,7 @@ test('parse axinom mpd with drm from text', async () => {
 
   const parseConfig = new ParserConfig();
   const streamExtractor = new StreamExtractor(parseConfig);
-  await streamExtractor.loadSourceFromText(text, url);
+  streamExtractor.loadSourceFromText(text, url);
   const streams = await streamExtractor.extractStreams();
 
   const firstVideoTrack = streams.find((stream) => stream.type === 'video');
@@ -56,13 +49,3 @@ test('parse axinom mpd with drm from text', async () => {
   expect(firstSubtitleTrack?.codecs, 'wvtt');
   expect(firstSubtitleTrack?.languageCode, 'ru');
 });
-
-// test('mpd extraction from url', async () => {
-//   const url =
-//     'https://dash.akamaized.net/dash264/TestCases/1a/sony/SNE_DASH_SD_CASE1A_REVISED.mpd';
-//   const parserConfig = new ParserConfig();
-//   const streamExtractor = new StreamExtractor(parserConfig);
-//   await streamExtractor.loadSourceFromUrl(url);
-//   const streams = await streamExtractor.extractStreams();
-//   console.log(streams);
-// });
