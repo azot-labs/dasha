@@ -347,7 +347,10 @@ export class HlsExtractor implements Extractor {
         url = response.url;
         this.#m3u8Content = await response.text();
       } catch (e) {
-        if (url !== this.parserConfig.originalUrl) {
+        if (
+          this.parserConfig.originalUrl.startsWith('http') &&
+          url !== this.parserConfig.originalUrl
+        ) {
           const response = await fetch(this.parserConfig.originalUrl, {
             headers: this.parserConfig.headers,
           });
