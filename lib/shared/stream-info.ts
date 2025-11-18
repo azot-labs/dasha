@@ -1,6 +1,6 @@
 import { AudioCodec, MediaCodec, SubtitleCodec, VideoCodec, VideoDynamicRange } from './codec';
 import { Playlist } from './playlist';
-import { RoleType } from './role-type';
+import { ROLE_TYPE, RoleType } from './role-type';
 
 /**
  * List of all stream types.
@@ -15,6 +15,25 @@ export const ALL_STREAM_TYPES = ['video', 'audio', 'subtitle'] as const;
  * @public
  */
 export type StreamType = (typeof ALL_STREAM_TYPES)[number];
+
+const bitrateToString = (bitrate?: number) => {
+  return bitrate ? `${Math.round(bitrate / 1000)} Kbps` : '';
+};
+
+const roleToString = (role?: RoleType) => {
+  for (const [key, value] of Object.entries(ROLE_TYPE)) {
+    if (value === role) return key;
+  }
+  return '';
+};
+
+const durationToString = (seconds: number) => {
+  if (!Number.isFinite(seconds) || seconds < 0) return '';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (mins > 0) return `~${mins}m${secs.toString().padStart(2, '0')}s`;
+  return `~${secs}s`;
+};
 
 export abstract class StreamInfo {
   abstract get type(): StreamType | undefined;
@@ -81,20 +100,19 @@ export class VideoStreamInfo extends StreamInfo {
   }
 
   toShortString() {
-    const prefix = `Vid `;
-    const bitrate = this.bitrate ? `${this.bitrate / 1000} Kbps` : '';
-    const body = [
-      this.width ? `${this.width}x${this.height}` : '',
-      bitrate,
-      this.groupId,
-      this.frameRate,
-      this.codec ?? this.codecs,
-      this.videoRange,
-      this.role,
-    ]
-      .filter(Boolean)
-      .join(' | ');
-    return `${prefix} | ${body}`.trim();
+    const prefix = 'Vid';
+    const parts = [prefix];
+    if (this.width) parts.push(`${this.width}x${this.height}`);
+    if (this.bitrate) parts.push(bitrateToString(this.bitrate));
+    if (this.groupId) parts.push(this.groupId);
+    if (this.frameRate) parts.push(this.frameRate.toString());
+    if (this.codec) parts.push(this.codec);
+    if (this.videoRange) parts.push(this.videoRange);
+    if (this.segmentsCount) parts.push(`${this.segmentsCount} segments`);
+    if (this.role) parts.push(roleToString(this.role));
+    if (this.playlist) parts.push(durationToString(this.playlist.totalDuration));
+    const text = parts.filter(Boolean).join(' | ');
+    return text.trim();
   }
 }
 
@@ -117,22 +135,17 @@ export class AudioStreamInfo extends StreamInfo {
   }
 
   toShortString() {
-    const prefix = `Aud `;
-    const bitrate = this.bitrate ? `${this.bitrate / 1000} Kbps` : '';
-    const channels =
-      this.numberOfChannels || this.channels ? `${this.numberOfChannels ?? this.channels}CH` : '';
-    const body = [
-      this.groupId,
-      bitrate,
-      this.name,
-      this.codec ?? this.codecs,
-      this.languageCode,
-      channels,
-      this.role,
-    ]
-      .filter(Boolean)
-      .join(' | ');
-    return `${prefix} | ${body}`.trim();
+    const prefix = 'Aud';
+    const parts = [prefix];
+    if (this.groupId) parts.push(this.groupId);
+    if (this.bitrate) parts.push(bitrateToString(this.bitrate));
+    if (this.name) parts.push(this.name);
+    if (this.codec) parts.push(this.codec);
+    if (this.languageCode) parts.push(this.languageCode);
+    if (this.numberOfChannels) parts.push(`${this.numberOfChannels}CH`);
+    if (this.role) parts.push(roleToString(this.role));
+    const text = parts.filter(Boolean).join(' | ');
+    return text.trim();
   }
 }
 
@@ -152,11 +165,15 @@ export class SubtitleStreamInfo extends StreamInfo {
   }
 
   toShortString() {
-    const prefix = `Sub `;
-    const body = [this.groupId, this.languageCode, this.name, this.codecs, this.role]
-      .filter(Boolean)
-      .join(' | ');
-    return `${prefix} | ${body}`.trim();
+    const prefix = 'Sub';
+    const parts = [prefix];
+    const text = parts.filter(Boolean).join(' | ');
+    if (this.groupId) parts.push(this.groupId);
+    if (this.languageCode) parts.push(this.languageCode);
+    if (this.name) parts.push(this.name);
+    if (this.codec) parts.push(this.codec);
+    if (this.role) parts.push(roleToString(this.role));
+    return text.trim();
   }
 }
 

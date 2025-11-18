@@ -9,7 +9,7 @@ export const parseUrlFromManifest = (manifest: string) => {
 };
 
 export const load = async (name: string) => {
-  const text = await readFile(join('./test/assets', name), 'utf8');
+  const text = await readFile(join('./test/assets', name), 'utf8').then((data) => data.trim());
   const url = parseUrlFromManifest(text);
   return { text, url };
 };
