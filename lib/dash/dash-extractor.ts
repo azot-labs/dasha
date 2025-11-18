@@ -222,6 +222,7 @@ export class DashExtractor implements Extractor {
               streamInfo.channels = channelsString;
             }
           } else if (streamInfo.type === 'subtitle') {
+            streamInfo.bitrate = bitrate;
             if (roles) {
               streamInfo.cc = checkIsClosedCaption(roles);
             }
