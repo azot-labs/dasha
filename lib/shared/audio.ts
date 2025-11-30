@@ -1,5 +1,5 @@
-import { parseMimes } from '../shared/util';
-import { AudioCodec } from '../shared/codec';
+import { parseMimes } from './util';
+import { AudioCodec } from './codec';
 
 const parseAudioCodecFromMime = (mime: string): AudioCodec => {
   const target = mime.toLowerCase().trim().split('.')[0];

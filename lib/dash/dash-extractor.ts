@@ -18,14 +18,14 @@ import { MediaSegment } from '../shared/media-segment';
 import { DASH_TAGS } from './dash-tags';
 import { EncryptInfo } from '../shared/encrypt-info';
 import { parseRange } from './dash-utils';
-import { parseDynamicRange, tryParseVideoCodec } from './dash-video';
-import { checkIsClosedCaption, checkIsSdh, tryParseSubtitleCodec } from './dash-subtitle';
+import { parseDynamicRange, tryParseVideoCodec } from '../shared/video';
+import { checkIsClosedCaption, checkIsSdh, tryParseSubtitleCodec } from '../shared/subtitle';
 import {
   checkIsDescriptive,
   getDolbyDigitalPlusComplexityIndex,
   parseChannels,
   tryParseAudioCodec,
-} from './dash-audio';
+} from '../shared/audio';
 import { pipe } from '../shared/pipe';
 
 const createMediaStreamInfo = (params: {

@@ -16,6 +16,9 @@ import { EncryptInfo } from '../shared/encrypt-info';
 import { MediaSegment } from '../shared/media-segment';
 import { ENCRYPT_METHODS } from '../shared/encrypt-method';
 import { getRange } from './hls-utils';
+import { tryParseVideoCodec } from '../shared/video';
+import { tryParseAudioCodec } from '../shared/audio';
+import { tryParseSubtitleCodec } from '../shared/subtitle';
 
 export class HlsExtractor implements Extractor {
   get extractorType(): ExtractorType {
@@ -95,6 +98,7 @@ export class HlsExtractor implements Extractor {
         if (streamInfo.codecs && streamInfo.audioId) {
           streamInfo.codecs = streamInfo.codecs.split(',')[0];
         }
+        streamInfo.codec = tryParseVideoCodec(streamInfo.codecs);
         expectPlaylist = true;
       } else if (line.startsWith(HLS_TAGS.extXMedia)) {
         streamInfo = new VideoStreamInfo();
@@ -129,6 +133,15 @@ export class HlsExtractor implements Extractor {
         const characteristics = getAttribute(line, 'CHARACTERISTICS');
         if (characteristics) {
           streamInfo.characteristics = characteristics.split(',').at(-1)?.split('.').at(-1);
+        }
+        const codecs = getAttribute(line, 'CODECS');
+        streamInfo.codecs = streamInfo.codecs || codecs;
+        if (streamInfo.type === 'audio') {
+          streamInfo.codec = tryParseAudioCodec(codecs);
+        } else if (streamInfo.type === 'video') {
+          streamInfo.codec = tryParseVideoCodec(codecs);
+        } else if (streamInfo.type === 'subtitle') {
+          streamInfo.codec = tryParseSubtitleCodec(codecs);
         }
         streamInfos.push(streamInfo);
       } else if (line.startsWith('#')) {

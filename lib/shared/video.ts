@@ -1,4 +1,4 @@
-import { VideoCodec, VideoDynamicRange } from '../shared/codec';
+import { VideoCodec, VideoDynamicRange } from './codec';
 
 const PRIMARIES = {
   Unspecified: 0,

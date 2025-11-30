@@ -1,5 +1,5 @@
-import { parseMimes } from '../shared/util';
-import { SubtitleCodec } from '../shared/codec';
+import { parseMimes } from './util';
+import { SubtitleCodec } from './codec';
 
 const parseSubtitleCodecFromMime = (mime: string): SubtitleCodec => {
   const target = mime.toLowerCase().trim().split('.')[0];

@@ -17,4 +17,6 @@ test('parse premier m3u8 from text', async () => {
   await extractor.fetchPlayList(streams);
 
   expect(streams.length).toBe(8);
+
+  expect(streams[0].codec).toBe('avc');
 });
