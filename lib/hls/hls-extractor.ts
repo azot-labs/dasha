@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import fetch from 'ky';
 import { EXTRACTOR_TYPES, type ExtractorType } from '../shared/extractor-type';
 import { Extractor } from '../extractor';
 import { ParserConfig } from '../parser-config';

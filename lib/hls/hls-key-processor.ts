@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { b } from 'barsic';
+import fetch from 'ky';
 import { KeyProcessor } from '../processor';
 import { EXTRACTOR_TYPES, ExtractorType } from '../shared/extractor-type';
 import { ParserConfig } from '../parser-config';

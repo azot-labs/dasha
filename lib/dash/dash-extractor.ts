@@ -1,5 +1,6 @@
 import { Temporal } from 'temporal-polyfill';
 import { DOMParser, Element, LiveNodeList } from '@xmldom/xmldom';
+import fetch from 'ky';
 import { EXTRACTOR_TYPES, ExtractorType } from '../shared/extractor-type';
 import { ParserConfig } from '../parser-config';
 import { ENCRYPT_METHODS, EncryptMethod } from '../shared/encrypt-method';

@@ -63,6 +63,7 @@
   "dependencies": {
     "@xmldom/xmldom": "^0.9.8",
     "barsic": "^0.2.0",
+    "ky": "^1.14.2",
     "temporal-polyfill": "^0.3.0"
   },
   "devDependencies": {

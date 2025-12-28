@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import fetch from 'ky';
 import { ExtractorType } from './shared/extractor-type';
 import { ParserConfig } from './parser-config';
 import { Extractor } from './extractor';
