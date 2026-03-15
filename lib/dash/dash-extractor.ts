@@ -492,7 +492,7 @@ export class DashExtractor implements Extractor {
               const defaultKID = contentProtection.getAttribute('cenc:default_KID') || undefined;
               const pssh =
                 contentProtection.getElementsByTagName('cenc:pssh')[0]?.textContent || undefined;
-              const drmData = { keyId: defaultKID, pssh: pssh };
+              const drmData = { keyId: defaultKID, pssh: pssh?.trim() };
               if (schemeIdUri?.includes(widevineSystemId)) {
                 encryptInfo.drm.widevine = drmData;
               } else if (schemeIdUri?.includes(playreadySystemId)) {
@@ -507,7 +507,8 @@ export class DashExtractor implements Extractor {
             }
             const segments = streamInfo.playlist.mediaParts[0].mediaSegments;
             for (const segment of segments) {
-              if (!segment.encryptInfo) segment.encryptInfo = encryptInfo;
+              if (!segment.encryptInfo || segment.encryptInfo.method === 'unknown')
+                segment.encryptInfo = encryptInfo;
             }
           }
 
@@ -561,6 +562,8 @@ export class DashExtractor implements Extractor {
             }
             streamInfos.push(streamInfo);
           }
+
+
 
           segBaseUrl = representationsBaseUrl;
         }
