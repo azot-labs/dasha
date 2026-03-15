@@ -58,13 +58,13 @@
     }
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.16"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.8",
     "barsic": "^0.2.0",
-    "ky": "^1.14.2",
-    "temporal-polyfill": "^0.3.0"
+    "ky": "^1.14.3",
+    "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -77,6 +77,6 @@
     "tsdown": "^0.16.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.3",
-    "vitest": "^4.0.8"
+    "vitest": "^4.1.0"
   }
 }
