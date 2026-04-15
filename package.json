@@ -2,6 +2,7 @@
   "name": "dasha",
   "version": "4.0.0-alpha.12",
   "description": "Streaming manifest parser",
+  "packageManager": "pnpm@10.28.1",
   "files": [
     "dist"
   ],
@@ -11,7 +12,7 @@
     "fix": "oxlint . --fix && oxfmt --write .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsdown dasha.ts --format esm --format cjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "pnpm build"
   },
   "type": "module",
   "main": "./dist/dasha.mjs",
