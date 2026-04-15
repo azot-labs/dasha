@@ -7,8 +7,8 @@
   ],
   "scripts": {
     "test": "vitest",
-    "lint": "eslint . && prettier --check .",
-    "fix": "eslint . --fix && prettier --write .",
+    "lint": "oxlint . && oxfmt --check .",
+    "fix": "oxlint . --fix && oxfmt --write .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsdown dasha.ts --format esm --format cjs",
     "prepublishOnly": "npm run build"
@@ -67,16 +67,11 @@
     "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
     "@types/node": "^24.10.0",
-    "eslint": "^9.39.1",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.4",
-    "globals": "^16.5.0",
-    "prettier": "^3.6.2",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^1.60.0",
     "tsdown": "^0.16.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.46.3",
     "vitest": "^4.1.0"
   }
 }

@@ -563,8 +563,6 @@ export class DashExtractor implements Extractor {
             streamInfos.push(streamInfo);
           }
 
-
-
           segBaseUrl = representationsBaseUrl;
         }
         segBaseUrl = adaptationSetsBaseUrl;
