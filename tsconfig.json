@@ -1,13 +1,15 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "moduleResolution": "node",
+    "target": "esnext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
     "strict": true,
-    "baseUrl": ".",
     "lib": ["ESNext", "DOM"],
-    "preserveWatchOutput": true,
-    "skipLibCheck": true,
-    "allowSyntheticDefaultImports": true
+    "types": ["node"],
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitOverride": true,
+    "noUncheckedSideEffectImports": true,
+    "preserveWatchOutput": true
   },
   "include": ["*.ts", "lib/**/*.ts"]
 }

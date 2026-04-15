@@ -82,7 +82,7 @@ export abstract class StreamInfo {
 }
 
 export class VideoStreamInfo extends StreamInfo {
-  codec?: VideoCodec;
+  override codec?: VideoCodec;
   width?: number;
   height?: number;
   frameRate?: number;
@@ -90,7 +90,7 @@ export class VideoStreamInfo extends StreamInfo {
   dynamicRange?: VideoDynamicRange;
   dolbyVisionProfile?: 'P5' | 'P7' | 'P8' | string;
 
-  get type() {
+  override get type() {
     return 'video' as const;
   }
 
@@ -117,7 +117,7 @@ export class VideoStreamInfo extends StreamInfo {
 }
 
 export class AudioStreamInfo extends StreamInfo {
-  codec?: AudioCodec;
+  override codec?: AudioCodec;
   numberOfChannels?: number;
   sampleRate?: number;
 
@@ -125,7 +125,7 @@ export class AudioStreamInfo extends StreamInfo {
   descriptive?: boolean;
   joc?: number;
 
-  get type() {
+  override get type() {
     return 'audio' as const;
   }
 
@@ -150,12 +150,12 @@ export class AudioStreamInfo extends StreamInfo {
 }
 
 export class SubtitleStreamInfo extends StreamInfo {
-  codec?: SubtitleCodec;
+  override codec?: SubtitleCodec;
   cc?: boolean;
   sdh?: boolean;
   forced?: boolean;
 
-  get type() {
+  override get type() {
     return 'subtitle' as const;
   }
 
