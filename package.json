@@ -65,7 +65,7 @@
     "@xmldom/xmldom": "^0.9.9",
     "barsic": "^0.2.0",
     "ky": "^1.14.3",
-    "mediabunny": "1.42.0-beta.2",
+    "mediabunny": "1.42.0-beta.3",
     "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {
