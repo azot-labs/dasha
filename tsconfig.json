@@ -6,6 +6,7 @@
     "strict": true,
     "lib": ["ESNext", "DOM"],
     "types": ["node"],
+    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noImplicitOverride": true,
     "noUncheckedSideEffectImports": true,
