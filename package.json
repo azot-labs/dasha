@@ -11,7 +11,7 @@
     "lint": "oxlint . && oxfmt --check .",
     "fix": "oxlint . --fix && oxfmt --write .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "tsdown dasha.ts --format esm --format cjs",
+    "build": "tsdown dasha.ts --format esm",
     "prepublishOnly": "pnpm build"
   },
   "type": "module",
@@ -19,14 +19,9 @@
   "types": "./dist/dasha.d.mts",
   "exports": {
     ".": {
-      "require": {
-        "types": "./dist/dasha.d.cts",
-        "default": "./dist/dasha.cjs"
-      },
-      "import": {
-        "types": "./dist/dasha.d.mts",
-        "default": "./dist/dasha.mjs"
-      }
+      "types": "./dist/dasha.d.mts",
+      "module-sync": "./dist/dasha.mjs",
+      "default": "./dist/dasha.mjs"
     }
   },
   "repository": {
