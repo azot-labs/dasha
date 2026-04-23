@@ -1,11 +1,9 @@
 import { desc, asc, HLS_FORMATS, Input, UrlSource, InputTrack } from 'mediabunny';
-import type { InputTrackBacking } from '../node_modules/mediabunny/src/input-track';
-import type { HlsSegmentedInput } from '../node_modules/mediabunny/src/hls/hls-segmented-input';
-import type { HlsSegment } from '../node_modules/mediabunny/src/hls/hls-segmented-input';
+import type { HlsSegmentedInput, HlsSegment, InputTrackWithBacking } from './mediabunny';
 
 export const getSegmentedInput = (track: InputTrack): HlsSegmentedInput => {
-  const backing: InputTrackBacking = (track as any)._backing;
-  const internalTrack = (backing as any).internalTrack;
+  const backing = (track as InputTrackWithBacking)._backing;
+  const internalTrack = backing.internalTrack;
   return internalTrack.demuxer.getSegmentedInputForPath(internalTrack.fullPath);
 };
 
@@ -15,4 +13,5 @@ export const getSegments = async (track: InputTrack): Promise<HlsSegment[]> => {
   return segmentedInput.segments;
 };
 
-export { InputTrack, HlsSegmentedInput, HlsSegment, Input, UrlSource, HLS_FORMATS, desc, asc };
+export { InputTrack, Input, UrlSource, HLS_FORMATS, desc, asc };
+export type { HlsSegment, HlsSegmentedInput, InputTrackWithBacking };
