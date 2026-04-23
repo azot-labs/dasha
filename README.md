@@ -68,10 +68,10 @@ async function saveVideo() {
 
   const outputPath = 'output.mp4';
   const urls = segments.map((segment) => segment.location.path);
-  const initSegment = segments[0].initSegment;
+  const initSegment = segments[0]?.initSegment;
   if (initSegment) urls.unshift(initSegment.location.path);
-  for (const segment of segments) {
-    const content = await fetch(segment.location.path).then((res) => res.arrayBuffer());
+  for (const url of urls) {
+    const content = await fetch(url).then((res) => res.arrayBuffer());
     await fs.appendFile(outputPath, new Uint8Array(content));
   }
 };
