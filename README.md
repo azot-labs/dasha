@@ -37,7 +37,7 @@ for (const stream of streams) {
 }
 ```
 
-### New API (HLS-only for now)
+### New API
 
 ```ts
 import fs from 'node:fs/promises';
@@ -75,6 +75,39 @@ async function saveVideo() {
     await fs.appendFile(outputPath, new Uint8Array(content));
   }
 };
+```
+
+```ts
+import fs from 'node:fs/promises';
+import { DASH_FORMATS, Input, UrlSource, desc, getSegments } from 'dasha';
+
+async function saveDashVideo() {
+  const input = new Input({
+    source: new UrlSource(
+      'https://dash.akamaized.net/dash264/TestCases/1a/netflix/exMPD_BIP_TC1.mpd',
+    ),
+    formats: DASH_FORMATS,
+  });
+
+  const videoTracks = await input.getVideoTracks({
+    sortBy: async (track) => [
+      desc(await track.getDisplayHeight()),
+      desc(await track.getBitrate()),
+    ],
+  });
+
+  const bestVideoTrack = videoTracks[0];
+  const segments = await getSegments(bestVideoTrack);
+
+  const outputPath = 'output.m4s';
+  const urls = segments.map((segment) => segment.location.path);
+  const initSegment = segments[0]?.initSegment;
+  if (initSegment) urls.unshift(initSegment.location.path);
+  for (const url of urls) {
+    const content = await fetch(url).then((res) => res.arrayBuffer());
+    await fs.appendFile(outputPath, new Uint8Array(content));
+  }
+}
 ```
 
 ## Credits

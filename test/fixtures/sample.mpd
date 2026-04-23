@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD
+  xmlns="urn:mpeg:dash:schema:mpd:2011"
+  type="static"
+  mediaPresentationDuration="PT12S"
+  minBufferTime="PT1.5S"
+>
+  <Period id="main">
+    <AdaptationSet contentType="video" mimeType="video/mp4" codecs="avc1.64001f">
+      <Representation id="video-480p" bandwidth="1000000" width="854" height="480">
+        <SegmentTemplate
+          timescale="1"
+          duration="4"
+          initialization="video/init-$RepresentationID$.mp4"
+          media="video/chunk-$RepresentationID$-$Number$.m4s"
+          startNumber="1"
+        />
+      </Representation>
+      <Representation id="video-720p" bandwidth="2000000" width="1280" height="720">
+        <SegmentTemplate
+          timescale="1"
+          duration="4"
+          initialization="video/init-$RepresentationID$.mp4"
+          media="video/chunk-$RepresentationID$-$Number$.m4s"
+          startNumber="1"
+        />
+      </Representation>
+    </AdaptationSet>
+
+    <AdaptationSet contentType="audio" mimeType="audio/mp4" codecs="mp4a.40.2" lang="en">
+      <Representation id="audio-en" bandwidth="128000">
+        <SegmentTemplate
+          timescale="1"
+          duration="4"
+          initialization="audio/init-$RepresentationID$.mp4"
+          media="audio/chunk-$RepresentationID$-$Number$.m4s"
+          startNumber="1"
+        />
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
