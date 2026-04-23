@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expect, test } from 'vitest';
-import { DASH_FORMATS, Input, UrlSource, desc, getSegments, isInput } from '../lib/input';
+import { DASH, DASH_FORMATS, Input, UrlSource, desc, getSegments, isInput } from '../dasha';
 
 test('parse dash with the mediabunny-like input API', async () => {
   const manifestPath = path.resolve('test/fixtures/sample.mpd');
@@ -13,7 +13,8 @@ test('parse dash with the mediabunny-like input API', async () => {
   });
 
   expect(isInput(input)).toBe(true);
-  expect(input instanceof Input).toBe(false);
+  expect(input instanceof Input).toBe(true);
+  expect(await input.getFormat()).toBe(DASH);
 
   const videoTracks = await input.getVideoTracks({
     sortBy: async (track) => [

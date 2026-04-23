@@ -1,51 +1,53 @@
 import { expect, test } from 'vitest';
-import { StreamExtractor } from '../lib/stream-extractor';
-import { ParserConfig } from '../lib/parser-config';
-import { load } from './utils';
-import { DashExtractor } from '../lib/dash/dash-extractor';
+import { DASH, DASH_FORMATS, getSegments } from '../dasha';
+import { createAssetInput, loadAsset } from './utils';
 
-test('parse axinom mpd from text', async () => {
-  const { text, url } = await load('axinom-1.mpd');
+test('parse axinom clear manifest through the Input API', async () => {
+  const { originalUrl } = await loadAsset('axinom-1.mpd');
+  using input = createAssetInput('axinom-1.mpd', DASH_FORMATS);
 
-  const parseConfig = new ParserConfig();
-  parseConfig.originalUrl = url!;
-  const extractor = new DashExtractor(parseConfig);
-  const streamInfos = await extractor.extractStreams(text);
+  expect(await input.getFormat()).toBe(DASH);
+  expect(await input.canRead()).toBe(true);
 
-  expect(streamInfos).not.toBeNullable();
-  expect(streamInfos.length).toBe(23);
+  const tracks = await input.getTracks();
+  expect(tracks).toHaveLength(23);
+  expect(tracks.filter((track) => track.type === 'subtitle')).toHaveLength(10);
 
-  const first = streamInfos.at(0);
-  console.log(first?.toShortString());
-  expect(first?.toShortString()).toBe(
-    'Vid | 512x288 | 386 Kbps | 1 | avc | 184 segments | Main | ~12m16s',
-  );
-  expect(first?.audioId).toBe('15');
-  expect(first?.bitrate).toBe(386437);
-  expect(first?.languageCode).toBe('und');
-  expect(first?.subtitleId).toBe('25');
+  const targetTrack = (
+    await input.getVideoTracks({
+      filter: async (track) =>
+        (await track.getDisplayHeight()) === 288 && (await track.getBitrate()) === 386437,
+    })
+  )[0];
 
-  expect(first?.playlist).not.toBeNullable();
-  expect(first?.playlist?.isLive).toBeFalsy();
-  expect(first?.playlist?.totalDuration).toBe(736);
-  expect(first?.playlist?.mediaInit).not.toBeNullable();
-  expect(first?.playlist?.mediaInit?.url).toBe('1/init.mp4');
-  expect(first?.playlist?.mediaParts[0]?.mediaSegments[0]?.url).toBe('1/0001.m4s');
+  expect(targetTrack).toBeDefined();
+  expect(await targetTrack!.getDurationFromMetadata()).toBe(736);
+
+  const segments = await getSegments(targetTrack!);
+  expect(segments).toHaveLength(184);
+  expect(segments[0]?.initSegment?.location.path).toBe(new URL('1/init.mp4', originalUrl!).toString());
+  expect(segments[0]?.location.path).toBe(new URL('1/0001.m4s', originalUrl!).toString());
 });
 
-test('parse axinom mpd with drm from text', async () => {
-  const { text, url } = await load('axinom-2.mpd');
+test('parse axinom multi-drm manifest through the Input API', async () => {
+  const { originalUrl } = await loadAsset('axinom-2.mpd');
+  using input = createAssetInput('axinom-2.mpd', DASH_FORMATS);
 
-  const parseConfig = new ParserConfig();
-  const streamExtractor = new StreamExtractor(parseConfig);
-  streamExtractor.loadSourceFromText(text, url);
-  const streams = await streamExtractor.extractStreams();
+  const tracks = await input.getTracks();
+  expect(tracks).toHaveLength(23);
 
-  const firstVideoTrack = streams.find((stream) => stream.type === 'video');
-  const firstVideoSegment = firstVideoTrack?.playlist?.mediaParts[0]?.mediaSegments[0];
-  expect(firstVideoSegment?.url).toBe(url!.replace('Manifest_1080p.mpd', '1/0001.m4s'));
+  const firstSubtitleTrack = tracks.find((track) => track.type === 'subtitle');
+  expect(await firstSubtitleTrack?.getCodec()).toBe('wvtt');
+  const subtitleLanguages = await Promise.all(
+    tracks
+      .filter((track) => track.type === 'subtitle')
+      .map((track) => track.getLanguageCode()),
+  );
+  expect(subtitleLanguages).toContain('ru');
 
-  const firstSubtitleTrack = streams.find((stream) => stream.type === 'subtitle');
-  expect(firstSubtitleTrack?.codecs, 'wvtt');
-  expect(firstSubtitleTrack?.languageCode, 'ru');
+  const firstVideoTrack = await input.getPrimaryVideoTrack();
+  const firstVideoSegment = (await getSegments(firstVideoTrack!))[0];
+  expect(firstVideoSegment?.location.path.startsWith(new URL('.', originalUrl!).toString())).toBe(true);
+  expect(firstVideoSegment?.location.path.endsWith('/0001.m4s')).toBe(true);
+  expect(firstVideoSegment?.encryption?.method).toBe('cenc');
 });

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { getSegments, desc, HLS_FORMATS, Input, UrlSource } from '../lib/input';
+import { getSegments, desc, HLS_FORMATS, Input, UrlSource, isInput } from '../dasha';
 
 test('parse hls with sample aes', async () => {
   const input = new Input({
@@ -9,6 +9,8 @@ test('parse hls with sample aes', async () => {
     ),
     formats: HLS_FORMATS,
   });
+
+  expect(isInput(input)).toBe(true);
 
   const videoTracks = await input.getVideoTracks({
     sortBy: async (track) => [
@@ -42,6 +44,5 @@ test('parse hls with sample aes', async () => {
   expect(thirdSegment.location.path).toBe(
     'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/v-0576p-1400k-libx264-s3.mp4',
   );
-  console.log(thirdSegment);
   expect(thirdSegment.encryption?.method).toBe('SAMPLE-AES-CTR');
 });

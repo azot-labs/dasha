@@ -1,7 +1,8 @@
+import { readFile } from 'node:fs/promises';
 import { desc, prefer } from 'mediabunny';
 import type { Source } from 'mediabunny';
-import { StreamExtractor } from './stream-extractor';
 import { ParserConfig } from './parser-config';
+import { DashExtractor } from './dash/dash-extractor';
 import type { EncryptInfo } from './shared/encrypt-info';
 import { ENCRYPT_METHODS } from './shared/encrypt-method';
 import type { MediaSegment } from './shared/media-segment';
@@ -155,6 +156,42 @@ const getSourceHeaders = (source: Source): Record<string, string> => {
   };
 };
 
+const parseOriginalUrlFromManifest = (text: string) =>
+  text.match(/<!--\s*URL:\s*([^\n]+?)\s*-->/)?.[1]?.trim();
+
+const loadManifestText = async (source: Source) => {
+  const manifestPath = getSourcePath(source);
+  if (!manifestPath) {
+    throw new Error('DASH input currently requires a pathed source such as UrlSource.');
+  }
+
+  if (manifestPath.startsWith('http://') || manifestPath.startsWith('https://')) {
+    const response = await fetch(manifestPath, {
+      headers: getSourceHeaders(source),
+    });
+    const text = await response.text();
+    return {
+      text,
+      url: response.url,
+    };
+  }
+
+  if (manifestPath.startsWith('file:')) {
+    const filePath = new URL(manifestPath);
+    const text = await readFile(filePath, 'utf8');
+    return {
+      text,
+      url: parseOriginalUrlFromManifest(text) ?? manifestPath,
+    };
+  }
+
+  const text = await readFile(manifestPath, 'utf8');
+  return {
+    text,
+    url: parseOriginalUrlFromManifest(text) ?? manifestPath,
+  };
+};
+
 const getSegmentLocation = (segment: MediaSegment): DashSegmentLocation => ({
   path: segment.url,
   offset: segment.startRange ?? 0,
@@ -279,12 +316,33 @@ abstract class DashInputTrackBase {
     return this.streamInfo.bitrate ?? null;
   }
 
+  async getDurationFromMetadata() {
+    return this.streamInfo.playlist?.totalDuration ?? null;
+  }
+
+  async computeDuration() {
+    return this.streamInfo.playlist?.totalDuration ?? 0;
+  }
+
+  async getFirstTimestamp() {
+    return 0;
+  }
+
   async hasOnlyKeyPackets() {
     return false;
   }
 
   async canDecode() {
     return true;
+  }
+
+  async isLive() {
+    return this.streamInfo.playlist?.isLive ?? false;
+  }
+
+  async getLiveRefreshInterval() {
+    if (!this.streamInfo.playlist?.isLive) return null;
+    return this.streamInfo.playlist.refreshIntervalMs / 1000;
   }
 
   async getDisposition(): Promise<TrackDisposition> {
@@ -415,7 +473,8 @@ export const isDashInputTrack = (track: unknown): track is DashInputTrack =>
   track instanceof DashInputSubtitleTrack;
 
 type LoadedDashInput = {
-  extractor: StreamExtractor;
+  extractor: DashExtractor;
+  manifestUrl: string;
   tracks: DashInputTrack[];
 };
 
@@ -440,12 +499,14 @@ export class DashInput {
         throw new Error('DASH input currently requires a pathed source such as UrlSource.');
       }
 
+      const { text, url } = await loadManifestText(this.source);
       const parserConfig = new ParserConfig();
       parserConfig.headers = getSourceHeaders(this.source);
+      parserConfig.originalUrl = url;
+      parserConfig.url = url;
 
-      const extractor = new StreamExtractor(parserConfig);
-      await extractor.loadSourceFromUrl(manifestPath);
-      const streams = await extractor.extractStreams();
+      const extractor = new DashExtractor(parserConfig);
+      const streams = await extractor.extractStreams(text.trim());
       await extractor.fetchPlayList(streams);
 
       const tracks: DashInputTrack[] = [];
@@ -468,6 +529,7 @@ export class DashInput {
 
       return {
         extractor,
+        manifestUrl: url,
         tracks,
       };
     })();
@@ -482,6 +544,13 @@ export class DashInput {
   async canRead() {
     await this.#load();
     return true;
+  }
+
+  async getDurationFromMetadata(tracks?: DashInputTrack[]) {
+    const targetTracks = tracks ?? (await this.getTracks());
+    if (targetTracks.length === 0) return null;
+
+    return Math.max(...targetTracks.map((track) => track.streamInfo.playlist?.totalDuration ?? 0));
   }
 
   async getTracks(query?: InputTrackQuery<DashInputTrack>) {
@@ -536,8 +605,9 @@ export class DashInput {
   }
 
   async refreshSegments(track: DashInputTrack): Promise<void> {
-    const { extractor, tracks } = await this.#load();
+    const { extractor, manifestUrl, tracks } = await this.#load();
     if (!track.streamInfo.playlist?.isLive) return;
+    if (!manifestUrl.startsWith('http://') && !manifestUrl.startsWith('https://')) return;
 
     await extractor.refreshPlayList(tracks.map((item) => item.streamInfo));
   }

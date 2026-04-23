@@ -1,24 +1,32 @@
 import { appendFile, readFile, stat, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { Input, UrlSource } from '../dasha';
 
-export const parseUrlFromManifest = (manifest: string) => {
-  if (manifest.includes('<!-- URL: ')) {
-    return manifest.match(/<!-- URL: (.*) -->/)?.[1];
-  }
+export const assetPath = (name: string) => path.resolve('./test/assets', name);
+export const assetFileUrl = (name: string) => pathToFileURL(assetPath(name)).toString();
+
+export const parseUrlFromManifest = (manifest: string) =>
+  manifest.match(/<!--\s*URL:\s*([^\n]+?)\s*-->/)?.[1]?.trim();
+
+export const loadAsset = async (name: string) => {
+  const text = await readFile(assetPath(name), 'utf8').then((data) => data.trim());
+  const originalUrl = parseUrlFromManifest(text);
+  return { text, originalUrl };
 };
 
-export const load = async (name: string) => {
-  const text = await readFile(join('./test/assets', name), 'utf8').then((data) => data.trim());
-  const url = parseUrlFromManifest(text);
-  return { text, url };
-};
+export const loadAssetSync = (name: string) => readFileSync(assetPath(name), 'utf8');
 
-export const loadSync = (name: string) => readFileSync(join('./test/assets', name), 'utf8');
+export const createAssetInput = (name: string, formats: readonly unknown[]) =>
+  new Input({
+    source: new UrlSource(assetFileUrl(name)),
+    formats: formats as never,
+  });
 
 export const save = async (name: string, content: string) => {
-  const filepath = join('./test/assets', name);
-  await writeFile(join('./test/assets', name), content);
+  const filepath = assetPath(name);
+  await writeFile(filepath, content);
   return filepath;
 };
 
