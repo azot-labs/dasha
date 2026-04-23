@@ -1,0 +1,10 @@
+https://bitmovin.com/demos/drm
+https://test-streams.mux.dev/
+https://hlsjs.video-dev.org/demo/
+https://optiview.dolby.com/resources/demos/test-stream/
+https://github.com/nilaoda/N_m3u8DL-RE/blob/main/TestStreams.md
+
+https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/hls.m3u8
+https://cdn.bitmovin.com/content/assets/art-of-motion-dash-hls-progressive/m3u8s/f08e80da-bf1d-4e3d-8899-f0f6155f6efa.m3u8
+https://cdn.bitmovin.com/content/assets/art-of-motion_drm/m3u8s/11331.m3u8
+https://test-streams.mux.dev/bbbAES/playlists/sample_aes/index.m3u8

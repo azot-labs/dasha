@@ -20,7 +20,7 @@ npm install dasha@alpha
 
 ```js
 import fs from 'node:fs/promises';
-import { parse } from 'dasha';
+import { StreamExtractor } from 'dasha';
 
 const url = 'https://dash.akamaized.net/dash264/TestCases/1a/sony/SNE_DASH_SD_CASE1A_REVISED.mpd';
 const streamExtractor = new StreamExtractor();
@@ -37,10 +37,47 @@ for (const stream of streams) {
 }
 ```
 
+### New API (HLS-only for now)
+
+```ts
+import fs from 'node:fs/promises';
+import { getSegments, desc, HLS_FORMATS, Input, UrlSource } from 'dasha';
+
+async function saveVideo() {
+  const input = new Input({
+    source: new UrlSource(
+      'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/hls.m3u8',
+      { requestInit: { headers: { Referer: 'https://bitmovin.com/' } } },
+    ),
+    formats: HLS_FORMATS,
+  });
+
+  const videoTracks = await input.getVideoTracks({
+    sortBy: async (track) => [
+      desc(await track.getDisplayHeight()),
+      // Tracks with matching resolution are sorted by bitrate
+      desc(await track.getBitrate()),
+    ],
+    // Filter out #EXT-X-I-FRAME-STREAM-INF tracks
+    filter: async (track) => !(await track.hasOnlyKeyPackets()),
+  });
+
+  const bestVideoTrack = videoTracks[0];
+
+  const segments = await getSegments(bestVideoTrack);
+
+  const outputPath = 'output.mp4';
+  const urls = segments.map((segment) => segment.location.path);
+  const initSegment = segments[0].initSegment;
+  if (initSegment) urls.unshift(initSegment.location.path);
+  for (const segment of segments) {
+    const content = await fetch(segment.location.path).then((res) => res.arrayBuffer());
+    await fs.appendFile(outputPath, new Uint8Array(content));
+  }
+};
+```
+
 ## Credits
 
-This project is heavily influenced by the robust implementation found in [N_m3u8DL-RE](https://github.com/nilaoda/N_m3u8DL-RE). Special thanks to the open-source community and contributors who make projects like this possible.
-
-## Licenses
-
-This project is licensed under the [MIT License](LICENSE).
+[mediabunny](https://github.com/Vanilagy/mediabunny)
+[N_m3u8DL-RE](https://github.com/nilaoda/N_m3u8DL-RE)
