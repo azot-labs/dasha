@@ -15,3 +15,4 @@ export * from './lib/stream-extractor';
 
 export * from './lib/dash';
 export * from './lib/hls';
+export * from './lib/input';
