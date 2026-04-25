@@ -505,7 +505,8 @@ const applySegmentList = (params: {
   const timelineEntries = segmentTimeline
     ? getSegmentTimelineEntries(segmentTimeline, timescale, segmentUrls.length)
     : null;
-  const fixedDuration = Number(segmentList.getAttribute('duration'));
+  const fixedDurationAttr = segmentList.getAttribute('duration');
+  const fixedDuration = fixedDurationAttr ? Number(fixedDurationAttr) : Number.NaN;
 
   for (const [segmentIndex, segmentUrl] of segmentUrls.entries()) {
     const media = segmentUrl.getAttribute('media');
@@ -651,6 +652,7 @@ const applyFixedDurationTemplate = (params: {
   }
 
   for (let number = startNumber, segmentIndex = 0; number < startNumber + totalNumber; number++) {
+    variables[DASH_TEMPLATE_TIME] = String((number - startNumber) * duration);
     variables[DASH_TEMPLATE_NUMBER] = String(number);
 
     appendDashSegment(track, {

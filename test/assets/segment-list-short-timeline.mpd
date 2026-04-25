@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT65S" minBufferTime="PT1.5S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4" contentType="video">
+      <Representation id="main" bandwidth="449000" width="482" height="270">
+        <BaseURL>https://www.example.com/low/</BaseURL>
+        <SegmentList>
+          <SegmentURL media="segment-1.ts" />
+          <SegmentURL media="segment-2.ts" />
+          <SegmentURL media="segment-3.ts" />
+          <SegmentURL media="segment-4.ts" />
+          <SegmentURL media="segment-5.ts" />
+          <SegmentTimeline>
+            <S d="10" t="50" />
+            <S d="5" />
+          </SegmentTimeline>
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

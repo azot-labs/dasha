@@ -28,6 +28,21 @@ test('parse audio-only SegmentBase manifest', async () => {
   expect(segments[0]?.initSegment?.location.length).toBe(786);
 });
 
+test('use the media resource as SegmentBase init segment when sourceURL is omitted', async () => {
+  using input = createAssetInput('segment-base-init-range.mpd', DASH_FORMATS);
+
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  expect(primaryVideoTrack).not.toBeNull();
+
+  const segments = await primaryVideoTrack!.getSegments();
+  expect(segments).toHaveLength(1);
+  expect(segments[0]?.duration).toBe(75);
+  expect(segments[0]?.location.path).toBe('https://example.com/video/stream.mp4');
+  expect(segments[0]?.initSegment?.location.path).toBe('https://example.com/video/stream.mp4');
+  expect(segments[0]?.initSegment?.location.offset).toBe(201);
+  expect(segments[0]?.initSegment?.location.length).toBe(100);
+});
+
 test('parse SegmentList manifest', async () => {
   using input = createAssetInput('basic-segment-list.mpd', DASH_FORMATS);
 
@@ -48,6 +63,34 @@ test('parse SegmentList manifest', async () => {
   expect(segments[0]?.initSegment).toBeNull();
   expect(segments[0]?.location.path).toBe('https://www.example.com/low/segment-1.ts');
   expect(segments[9]?.location.path).toBe('https://www.example.com/low/segment-10.ts');
+});
+
+test('truncate SegmentList entries when the timeline ends first', async () => {
+  using input = createAssetInput('segment-list-short-timeline.mpd', DASH_FORMATS);
+
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  expect(primaryVideoTrack).not.toBeNull();
+
+  const segments = await primaryVideoTrack!.getSegments();
+  expect(segments).toHaveLength(2);
+  expect(segments.map((segment) => segment.duration)).toEqual([10, 5]);
+  expect(segments.map((segment) => segment.timestamp)).toEqual([50, 60]);
+  expect(segments[0]?.location.path).toBe('https://www.example.com/low/segment-1.ts');
+  expect(segments[1]?.location.path).toBe('https://www.example.com/low/segment-2.ts');
+});
+
+test('apply SegmentList timescale to fixed-duration segments', async () => {
+  using input = createAssetInput('segment-list-timescale.mpd', DASH_FORMATS);
+
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  expect(primaryVideoTrack).not.toBeNull();
+
+  const segments = await primaryVideoTrack!.getSegments();
+  expect(segments).toHaveLength(4);
+  expect(segments.map((segment) => segment.duration)).toEqual([2, 2, 2, 2]);
+  expect(segments[0]?.initSegment?.location.path).toBe('https://www.example.com/high/init.mp4');
+  expect(segments[0]?.location.path).toBe('https://www.example.com/high/s1.m4s');
+  expect(segments[3]?.location.path).toBe('https://www.example.com/high/s4.m4s');
 });
 
 test('infer subtitle codecs from text manifests', async () => {
@@ -98,6 +141,29 @@ test('parse SegmentTemplate start numbers and padding', async () => {
   expect(segments[0]?.location.path).toBe('https://example.com/root/segment-video-main-010.m4s');
   expect(segments[1]?.location.path).toBe('https://example.com/root/segment-video-main-011.m4s');
   expect(segments[2]?.location.path).toBe('https://example.com/root/segment-video-main-012.m4s');
+});
+
+test('resolve SegmentTemplate variables in initialization and media urls', async () => {
+  using input = createAssetInput('segment-template-variables.mpd', DASH_FORMATS);
+
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  expect(primaryVideoTrack).not.toBeNull();
+
+  const segments = await primaryVideoTrack!.getSegments();
+  expect(segments).toHaveLength(3);
+  expect(segments.map((segment) => segment.duration)).toEqual([2, 2, 2]);
+  expect(segments[0]?.initSegment?.location.path).toBe(
+    'https://example.com/root/init-$-video-main-1200000.mp4',
+  );
+  expect(segments[0]?.location.path).toBe(
+    'https://example.com/root/chunk-$-video-main-1200000-010-0.m4s',
+  );
+  expect(segments[1]?.location.path).toBe(
+    'https://example.com/root/chunk-$-video-main-1200000-011-20.m4s',
+  );
+  expect(segments[2]?.location.path).toBe(
+    'https://example.com/root/chunk-$-video-main-1200000-012-40.m4s',
+  );
 });
 
 test('parse SegmentList timelines with ranged media segments', async () => {

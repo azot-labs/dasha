@@ -179,15 +179,53 @@ export const isLikelyDashPath = (source: Source) => {
 export const isDashManifestText = (text: string) => /<MPD(?:\s|>)/i.test(text);
 
 export const replaceDashVariables = (text: string, variables: Record<string, string>) => {
-  let result = text;
-  for (const [key, value] of Object.entries(variables)) {
-    result = result.replaceAll(key, String(value));
+  let result = '';
+
+  for (let index = 0; index < text.length; ) {
+    if (text[index] !== '$') {
+      result += text[index];
+      index += 1;
+      continue;
+    }
+
+    if (text[index + 1] === '$') {
+      result += '$';
+      index += 2;
+      continue;
+    }
+
+    const endIndex = text.indexOf('$', index + 1);
+    if (endIndex < 0) {
+      result += '$';
+      index += 1;
+      continue;
+    }
+
+    const token = text.slice(index + 1, endIndex);
+    const match = token.match(/^(RepresentationID|Bandwidth|Number|Time)(?:%([0-9]+)d)?$/);
+    if (!match) {
+      result += text.slice(index, endIndex + 1);
+      index = endIndex + 1;
+      continue;
+    }
+
+    const [, variableName, width] = match;
+    const key = `$${variableName}$`;
+    const value = variables[key];
+    if (value == null) {
+      result += text.slice(index, endIndex + 1);
+      index = endIndex + 1;
+      continue;
+    }
+
+    result +=
+      !width || variableName === 'RepresentationID'
+        ? value
+        : value.padStart(Number.parseInt(width, 10), '0');
+    index = endIndex + 1;
   }
 
-  return result.replace(/\$Number%([0-9]+)d\$/g, (_match, width: string) => {
-    const value = variables[DASH_TEMPLATE_NUMBER];
-    return value ? value.padStart(Number.parseInt(width, 10), '0') : '';
-  });
+  return result;
 };
 
 export const createDashTrackDescriptor = (params: {
