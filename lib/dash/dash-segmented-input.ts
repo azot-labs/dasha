@@ -84,11 +84,14 @@ export const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegme
 };
 
 export class DashSegmentedInput {
+  demuxer: DashInternalTrack['demuxer'];
   segments: DashSegment[] = [];
   currentUpdateSegmentsPromise: Promise<void> | null = null;
   lastSegmentUpdateTime = -Infinity;
 
-  constructor(readonly internalTrack: DashInternalTrack) {}
+  constructor(readonly internalTrack: DashInternalTrack) {
+    this.demuxer = internalTrack.demuxer;
+  }
 
   runUpdateSegments() {
     return (this.currentUpdateSegmentsPromise ??= (async () => {
@@ -99,12 +102,16 @@ export class DashSegmentedInput {
         }
 
         this.lastSegmentUpdateTime = performance.now();
-        await this.internalTrack.demuxer.refreshTrackSegments(this.internalTrack);
-        this.segments = trackToDashSegments(this.internalTrack);
+        await this.updateSegments();
       } finally {
         this.currentUpdateSegmentsPromise = null;
       }
     })());
+  }
+
+  async updateSegments() {
+    await this.demuxer.refreshTrackSegments(this.internalTrack);
+    this.segments = trackToDashSegments(this.internalTrack);
   }
 
   getRemainingWaitTimeMs() {
@@ -115,7 +122,12 @@ export class DashSegmentedInput {
 
     const elapsed = performance.now() - this.lastSegmentUpdateTime;
     const result = Math.max(0, segmentState.refreshIntervalMs - elapsed);
-    return result <= 50 ? 0 : result;
+    if (result <= 50) {
+      // Match HLS behaviour: skip tiny waits to avoid timing races around live refreshes.
+      return 0;
+    }
+
+    return result;
   }
 
   async getLiveRefreshInterval() {

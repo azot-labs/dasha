@@ -13,7 +13,8 @@ import {
   type DashParsedTrack,
   type DashParsedVideoTrack,
 } from './dash-misc';
-import { DashSegmentedInput, type DashSegment } from './dash-segmented-input';
+import type { DashDemuxer } from './dash-demuxer';
+import type { DashSegment } from './dash-segmented-input';
 
 type DashTrackInfo =
   | {
@@ -29,15 +30,10 @@ type DashTrackInfo =
       type: 'subtitle';
     };
 
-export type DashTrackOwner = {
-  internalTracks: DashInternalTrack[] | null;
-  getSegmentedInputForTrack(track: DashInternalTrack): DashSegmentedInput;
-  refreshTrackSegments(track: DashInternalTrack): Promise<void>;
-};
-
 export type DashInternalTrack = {
   id: number;
-  demuxer: DashTrackOwner;
+  demuxer: DashDemuxer;
+  backingTrack: DashInputTrackBacking | null;
   pairingMask: bigint;
   track: DashParsedTrack;
   info: DashTrackInfo;
@@ -126,7 +122,7 @@ const createTrackInfo = (track: DashParsedTrack): DashTrackInfo => {
 };
 
 export const createDashInternalTracks = (
-  demuxer: DashTrackOwner,
+  demuxer: DashDemuxer,
   tracks: DashParsedTrack[],
 ): DashInternalTrack[] => {
   const pairingMasks = createPairingMasks(tracks);
@@ -134,6 +130,7 @@ export const createDashInternalTracks = (
   return tracks.map((track, index) => ({
     id: index + 1,
     demuxer,
+    backingTrack: null,
     pairingMask: pairingMasks.get(track) ?? 0n,
     track,
     info: createTrackInfo(track),
@@ -363,23 +360,28 @@ class DashInputSubtitleTrackBacking extends DashBaseTrackBacking {
 
 export const createDashTrackBackings = (internalTracks: DashInternalTrack[]) =>
   internalTracks.map((internalTrack) => {
+    let backing: DashInputTrackBacking;
+
     if (internalTrack.info.type === 'video') {
-      return new DashInputVideoTrackBacking(
+      backing = new DashInputVideoTrackBacking(
         internalTrack as DashInternalTrack & {
           info: Extract<DashTrackInfo, { type: 'video' }>;
           track: DashParsedVideoTrack;
         },
       );
-    }
-    if (internalTrack.info.type === 'audio') {
-      return new DashInputAudioTrackBacking(
+    } else if (internalTrack.info.type === 'audio') {
+      backing = new DashInputAudioTrackBacking(
         internalTrack as DashInternalTrack & {
           info: Extract<DashTrackInfo, { type: 'audio' }>;
           track: DashParsedAudioTrack;
         },
       );
+    } else {
+      backing = new DashInputSubtitleTrackBacking(internalTrack);
     }
-    return new DashInputSubtitleTrackBacking(internalTrack);
+
+    internalTrack.backingTrack = backing;
+    return backing;
   });
 
 export type DashInputTrackBacking =

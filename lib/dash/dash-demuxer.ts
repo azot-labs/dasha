@@ -61,6 +61,15 @@ const DASH_NAMESPACE_MAP = new Map([
 const WIDEVINE_SYSTEM_ID = 'edef8ba9-79d6-4ace-a3c8-27dcd51d21ed';
 const PLAYREADY_SYSTEM_ID = '9a04f079-9840-4286-ab92-e65be0885f95';
 
+type DashManifestInfo = {
+  mpdElement: Element;
+  isLive: boolean;
+  availabilityStartTime: string | null;
+  timeShiftBufferDepth: string;
+  publishTime: string | null;
+  mediaPresentationDuration: string | null;
+};
+
 const isMissingNamespace = (rawText: string, tag: string) =>
   !rawText.includes(`xmlns:${tag}`) && rawText.includes(`<${tag}:`);
 
@@ -83,7 +92,10 @@ const processDashContent = (mpdContent: string) => {
   return replaceFirst(mpdContent, '<MPD ', `<MPD ${missingNamespaceDefinitions.join(' ')} `);
 };
 
-const createSegmentState = (isLive: boolean, timeShiftBufferDepth: string): DashSegmentState => ({
+const createDashSegmentState = (
+  isLive: boolean,
+  timeShiftBufferDepth: string,
+): DashSegmentState => ({
   isLive,
   refreshIntervalMs: Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2,
   initSegment: null,
@@ -99,7 +111,7 @@ const addWholeResourceSegment = (segmentState: DashSegmentState, url: string, du
   });
 };
 
-const createRangedSegment = (
+const createDashRangedSegment = (
   url: string,
   sequenceNumber: number,
   range?: string | null,
@@ -126,7 +138,7 @@ const getRoleType = (roleValue: string) => {
   return ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
 };
 
-const createTrack = (params: {
+const createDashTrack = (params: {
   adaptationSet: Element;
   bitrate: number;
   contentType: string | null;
@@ -159,7 +171,7 @@ const createTrack = (params: {
     contentType,
     mimeType,
   });
-  const segmentState = createSegmentState(isLive, timeShiftBufferDepth);
+  const segmentState = createDashSegmentState(isLive, timeShiftBufferDepth);
   const track = {
     type: descriptor.type,
     codec: descriptor.codec,
@@ -243,7 +255,7 @@ const createTrack = (params: {
   return track;
 };
 
-const normalizeTrackExtension = (track: DashParsedTrack) => {
+const normalizeDashTrackExtension = (track: DashParsedTrack) => {
   if (track.type === 'subtitle' && track.extension === 'mp4') {
     track.extension = 'm4s';
   }
@@ -266,7 +278,7 @@ const applySegmentBase = (representation: Element, track: DashParsedTrack, segBa
   const sourceUrl = initialization.getAttribute('sourceURL');
   if (!sourceUrl) return;
 
-  track.segmentState.initSegment = createRangedSegment(
+  track.segmentState.initSegment = createDashRangedSegment(
     combineUrl(segBaseUrl, sourceUrl),
     -1,
     initialization.getAttribute('range'),
@@ -281,7 +293,7 @@ const applySegmentList = (representation: Element, track: DashParsedTrack, segBa
   if (initialization) {
     const sourceUrl = initialization.getAttribute('sourceURL');
     if (sourceUrl) {
-      track.segmentState.initSegment = createRangedSegment(
+      track.segmentState.initSegment = createDashRangedSegment(
         combineUrl(segBaseUrl, sourceUrl),
         -1,
         initialization.getAttribute('range'),
@@ -298,7 +310,7 @@ const applySegmentList = (representation: Element, track: DashParsedTrack, segBa
     const media = segmentUrl.getAttribute('media');
     if (!media) continue;
 
-    const segment = createRangedSegment(
+    const segment = createDashRangedSegment(
       combineUrl(segBaseUrl, media),
       segmentIndex,
       segmentUrl.getAttribute('mediaRange'),
@@ -635,7 +647,11 @@ const applyContentProtection = (
   }
 };
 
-const mergePeriodTrack = (tracks: DashParsedTrack[], track: DashParsedTrack, isLive: boolean) => {
+const mergeDashPeriodTrack = (
+  tracks: DashParsedTrack[],
+  track: DashParsedTrack,
+  isLive: boolean,
+) => {
   const existingTrackIndex = tracks.findIndex(
     (item) =>
       item.type === track.type &&
@@ -680,7 +696,7 @@ const mergePeriodTrack = (tracks: DashParsedTrack[], track: DashParsedTrack, isL
   lastSegment.duration += incomingSegments.reduce((sum, segment) => sum + segment.duration, 0);
 };
 
-const linkDefaultGroups = (tracks: DashParsedTrack[]) => {
+const linkDefaultDashGroups = (tracks: DashParsedTrack[]) => {
   const audioList = tracks.filter((track) => track.type === 'audio');
   const subtitleList = tracks.filter((track) => track.type === 'subtitle');
   const videoList = tracks.filter((track) => track.type === 'video');
@@ -702,7 +718,7 @@ const linkDefaultGroups = (tracks: DashParsedTrack[]) => {
   }
 };
 
-class DashDemuxer {
+export class DashDemuxer {
   metadataPromise: Promise<void> | null = null;
   trackBackings: DashInputTrackBacking[] | null = null;
   internalTracks: DashInternalTrack[] | null = null;
@@ -781,17 +797,30 @@ class DashDemuxer {
   }
 
   #extractTracks(rawText: string): DashParsedTrack[] {
+    const manifest = this.#parseManifest(rawText);
     const tracks: DashParsedTrack[] = [];
 
+    for (const period of manifest.mpdElement.getElementsByTagName('Period')) {
+      this.#appendPeriodTracks(tracks, manifest, period);
+    }
+
+    linkDefaultDashGroups(tracks);
+    return tracks;
+  }
+
+  #parseManifest(rawText: string): DashManifestInfo {
     this.#mpdContent = processDashContent(rawText);
 
     const document = new DOMParser().parseFromString(this.#mpdContent, 'text/xml');
     const mpdElement = document.getElementsByTagName('MPD')[0];
-    const isLive = mpdElement.getAttribute('type') === 'dynamic';
-    const availabilityStartTime = mpdElement.getAttribute('availabilityStartTime');
-    const timeShiftBufferDepth = mpdElement.getAttribute('timeShiftBufferDepth') || 'PT1M';
-    const publishTime = mpdElement.getAttribute('publishTime');
-    const mediaPresentationDuration = mpdElement.getAttribute('mediaPresentationDuration');
+    const manifest: DashManifestInfo = {
+      mpdElement,
+      isLive: mpdElement.getAttribute('type') === 'dynamic',
+      availabilityStartTime: mpdElement.getAttribute('availabilityStartTime'),
+      timeShiftBufferDepth: mpdElement.getAttribute('timeShiftBufferDepth') || 'PT1M',
+      publishTime: mpdElement.getAttribute('publishTime'),
+      mediaPresentationDuration: mpdElement.getAttribute('mediaPresentationDuration'),
+    };
 
     const baseUrlElement = mpdElement.getElementsByTagName('BaseURL')[0];
     if (baseUrlElement?.textContent) {
@@ -802,63 +831,166 @@ class DashDemuxer {
       this.#baseUrl = combineUrl(this.#mpdUrl, baseUrl);
     }
 
-    for (const period of mpdElement.getElementsByTagName('Period')) {
-      const periodDurationSeconds = Temporal.Duration.from(
-        period.getAttribute('duration') || mediaPresentationDuration || 'PT0S',
-      ).total('seconds');
-      const periodBaseUrl = extendDashBaseUrl(period, this.#baseUrl);
+    return manifest;
+  }
 
-      for (const adaptationSet of period.getElementsByTagName('AdaptationSet')) {
-        const adaptationSetBaseUrl = extendDashBaseUrl(adaptationSet, periodBaseUrl);
-        const adaptationSetFrameRate = getDashFrameRate(adaptationSet);
-        let contentType = adaptationSet.getAttribute('contentType');
-        let mimeType = adaptationSet.getAttribute('mimeType');
+  #appendPeriodTracks(
+    tracks: DashParsedTrack[],
+    manifest: DashManifestInfo,
+    period: Element,
+  ): void {
+    const periodDurationSeconds = Temporal.Duration.from(
+      period.getAttribute('duration') || manifest.mediaPresentationDuration || 'PT0S',
+    ).total('seconds');
+    const periodBaseUrl = extendDashBaseUrl(period, this.#baseUrl);
 
-        for (const representation of adaptationSet.getElementsByTagName('Representation')) {
-          const segBaseUrl = extendDashBaseUrl(representation, adaptationSetBaseUrl);
-          contentType ||= representation.getAttribute('contentType');
-          mimeType ||= representation.getAttribute('mimeType');
-          const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
-          const track = createTrack({
-            adaptationSet,
-            bitrate,
-            contentType,
-            frameRate: adaptationSetFrameRate,
-            isLive,
-            manifestUrl: this.#mpdUrl,
-            mimeType,
-            originalUrl: this.originalUrl,
-            period,
-            publishTime,
-            representation,
-            timeShiftBufferDepth,
-          });
+    for (const adaptationSet of period.getElementsByTagName('AdaptationSet')) {
+      this.#appendAdaptationSetTracks({
+        tracks,
+        manifest,
+        period,
+        periodDurationSeconds,
+        periodBaseUrl,
+        adaptationSet,
+      });
+    }
+  }
 
-          applySegmentBase(representation, track, segBaseUrl);
-          applySegmentList(representation, track, segBaseUrl);
-          applySegmentTemplate({
-            adaptationSet,
-            availabilityStartTime,
-            bitrate,
-            groupId: track.groupId,
-            isLive,
-            periodDurationSeconds,
-            representation,
-            segBaseUrl,
-            segmentState: track.segmentState,
-            timeShiftBufferDepth,
-          });
-          ensureFallbackMediaSegment(track, segBaseUrl, periodDurationSeconds);
-          normalizeTrackExtension(track);
-          applyContentProtection(adaptationSet, representation, track);
+  #appendAdaptationSetTracks(params: {
+    tracks: DashParsedTrack[];
+    manifest: DashManifestInfo;
+    period: Element;
+    periodDurationSeconds: number;
+    periodBaseUrl: string;
+    adaptationSet: Element;
+  }): void {
+    const { tracks, manifest, period, periodDurationSeconds, periodBaseUrl, adaptationSet } =
+      params;
+    const adaptationSetBaseUrl = extendDashBaseUrl(adaptationSet, periodBaseUrl);
+    const adaptationSetFrameRate = getDashFrameRate(adaptationSet);
+    let contentType = adaptationSet.getAttribute('contentType');
+    let mimeType = adaptationSet.getAttribute('mimeType');
 
-          mergePeriodTrack(tracks, track, isLive);
-        }
-      }
+    for (const representation of adaptationSet.getElementsByTagName('Representation')) {
+      const segmentBaseUrl = extendDashBaseUrl(representation, adaptationSetBaseUrl);
+      contentType ||= representation.getAttribute('contentType');
+      mimeType ||= representation.getAttribute('mimeType');
+      const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
+      const track = this.#createTrack({
+        adaptationSet,
+        representation,
+        period,
+        manifest,
+        bitrate,
+        contentType,
+        mimeType,
+        frameRate: adaptationSetFrameRate,
+      });
+
+      this.#populateTrackSegments({
+        adaptationSet,
+        representation,
+        track,
+        manifest,
+        segmentBaseUrl,
+        periodDurationSeconds,
+        bitrate,
+      });
+
+      mergeDashPeriodTrack(tracks, track, manifest.isLive);
+    }
+  }
+
+  #createTrack(params: {
+    adaptationSet: Element;
+    representation: Element;
+    period: Element;
+    manifest: DashManifestInfo;
+    bitrate: number;
+    contentType: string | null;
+    mimeType: string | null;
+    frameRate: number | undefined;
+  }): DashParsedTrack {
+    const {
+      adaptationSet,
+      representation,
+      period,
+      manifest,
+      bitrate,
+      contentType,
+      mimeType,
+      frameRate,
+    } = params;
+
+    return createDashTrack({
+      adaptationSet,
+      bitrate,
+      contentType,
+      frameRate,
+      isLive: manifest.isLive,
+      manifestUrl: this.#mpdUrl,
+      mimeType,
+      originalUrl: this.originalUrl,
+      period,
+      publishTime: manifest.publishTime,
+      representation,
+      timeShiftBufferDepth: manifest.timeShiftBufferDepth,
+    });
+  }
+
+  #populateTrackSegments(params: {
+    adaptationSet: Element;
+    representation: Element;
+    track: DashParsedTrack;
+    manifest: DashManifestInfo;
+    segmentBaseUrl: string;
+    periodDurationSeconds: number;
+    bitrate: number;
+  }): void {
+    const {
+      adaptationSet,
+      representation,
+      track,
+      manifest,
+      segmentBaseUrl,
+      periodDurationSeconds,
+      bitrate,
+    } = params;
+
+    applySegmentBase(representation, track, segmentBaseUrl);
+    applySegmentList(representation, track, segmentBaseUrl);
+    applySegmentTemplate({
+      adaptationSet,
+      availabilityStartTime: manifest.availabilityStartTime,
+      bitrate,
+      groupId: track.groupId,
+      isLive: manifest.isLive,
+      periodDurationSeconds,
+      representation,
+      segBaseUrl: segmentBaseUrl,
+      segmentState: track.segmentState,
+      timeShiftBufferDepth: manifest.timeShiftBufferDepth,
+    });
+    ensureFallbackMediaSegment(track, segmentBaseUrl, periodDurationSeconds);
+    normalizeDashTrackExtension(track);
+    applyContentProtection(adaptationSet, representation, track);
+  }
+
+  #findMatchingTrack(
+    nextTracks: DashParsedTrack[],
+    currentTrack: DashParsedTrack,
+  ): DashParsedTrack | undefined {
+    let matchingTracks = nextTracks.filter(
+      (candidate) => getDashTrackMatchKey(candidate) === getDashTrackMatchKey(currentTrack),
+    );
+    if (!matchingTracks.length) {
+      matchingTracks = nextTracks.filter(
+        (candidate) =>
+          candidate.segmentState.initSegment?.url === currentTrack.segmentState.initSegment?.url,
+      );
     }
 
-    linkDefaultGroups(tracks);
-    return tracks;
+    return matchingTracks[0];
   }
 
   async #refreshTracks(tracks: DashParsedTrack[]): Promise<void> {
@@ -874,17 +1006,7 @@ class DashDemuxer {
 
     const newTracks = this.#extractTracks(rawText);
     for (const track of tracks) {
-      let matchingTracks = newTracks.filter(
-        (candidate) => getDashTrackMatchKey(candidate) === getDashTrackMatchKey(track),
-      );
-      if (!matchingTracks.length) {
-        matchingTracks = newTracks.filter(
-          (candidate) =>
-            candidate.segmentState.initSegment?.url === track.segmentState.initSegment?.url,
-        );
-      }
-
-      const nextTrack = matchingTracks[0];
+      const nextTrack = this.#findMatchingTrack(newTracks, track);
       if (!nextTrack) {
         continue;
       }
