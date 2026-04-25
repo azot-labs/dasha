@@ -50,10 +50,11 @@ const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] =>
   const mediaSegments = internalTrack.track.mediaSegments;
   if (mediaSegments.length === 0) return [];
 
-  let timestamp = 0;
+  let nextTimestamp = 0;
   const segments: DashSegment[] = [];
 
   for (const mediaSegment of mediaSegments) {
+    const timestamp = mediaSegment.timestamp ?? nextTimestamp;
     const dashSegment: DashSegment = {
       timestamp,
       duration: mediaSegment.duration,
@@ -66,7 +67,7 @@ const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] =>
       lastProgramDateTimeSeconds: null,
     };
     segments.push(dashSegment);
-    timestamp += mediaSegment.duration;
+    nextTimestamp = timestamp + mediaSegment.duration;
   }
 
   const firstSegment = segments[0] ?? null;

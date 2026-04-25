@@ -276,6 +276,45 @@ const createDashRangedSegment = (
   return segment;
 };
 
+const getSegmentTimelineEntries = (timeline: Element, timescale: number, limit: number) => {
+  const entries: { duration: number; timestamp: number }[] = [];
+  let currentTime = 0;
+
+  for (const entry of getDirectDashChildren(timeline, 'S')) {
+    const duration = Number(entry.getAttribute('d'));
+    if (!Number.isFinite(duration)) {
+      continue;
+    }
+
+    const startTime = entry.getAttribute('t');
+    if (startTime) {
+      currentTime = Number(startTime);
+    }
+
+    let repeatCount = Number(entry.getAttribute('r'));
+    if (!Number.isFinite(repeatCount)) {
+      repeatCount = 0;
+    }
+
+    const remaining = limit - entries.length;
+    if (remaining <= 0) {
+      break;
+    }
+
+    const totalEntries = repeatCount < 0 ? remaining : Math.min(repeatCount + 1, remaining);
+
+    for (let i = 0; i < totalEntries; i++) {
+      entries.push({
+        duration: duration / timescale,
+        timestamp: currentTime / timescale,
+      });
+      currentTime += duration;
+    }
+  }
+
+  return entries;
+};
+
 const getRoleType = (roleValue: string) => {
   const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
   const roleTypeKey = roleValue.split('-').map(capitalize).join('');
@@ -428,11 +467,8 @@ const applySegmentBase = (params: {
   const initialization = getDirectDashChild(segmentBaseElement, 'Initialization');
   if (!initialization) return;
 
-  const sourceUrl = initialization.getAttribute('sourceURL');
-  if (!sourceUrl) return;
-
   track.initSegment = createDashRangedSegment(
-    combineUrl(segmentBaseUrl, sourceUrl),
+    combineUrl(segmentBaseUrl, initialization.getAttribute('sourceURL') || ''),
     -1,
     initialization.getAttribute('range'),
   );
@@ -456,32 +492,37 @@ const applySegmentList = (params: {
 
   const initialization = getDirectDashChild(segmentList, 'Initialization');
   if (initialization) {
-    const sourceUrl = initialization.getAttribute('sourceURL');
-    if (sourceUrl) {
-      track.initSegment = createDashRangedSegment(
-        combineUrl(segmentBaseUrl, sourceUrl),
-        -1,
-        initialization.getAttribute('range'),
-      );
-    }
+    track.initSegment = createDashRangedSegment(
+      combineUrl(segmentBaseUrl, initialization.getAttribute('sourceURL') || ''),
+      -1,
+      initialization.getAttribute('range'),
+    );
   }
 
-  const duration = Number(segmentList.getAttribute('duration'));
   const timescale = Number(segmentList.getAttribute('timescale') || '1');
+  const segmentUrls = getDirectDashChildren(segmentList, 'SegmentURL');
+  const segmentTimeline = getDirectDashChild(segmentList, 'SegmentTimeline');
+  const timelineEntries = segmentTimeline
+    ? getSegmentTimelineEntries(segmentTimeline, timescale, segmentUrls.length)
+    : null;
+  const fixedDuration = Number(segmentList.getAttribute('duration'));
 
-  for (const [segmentIndex, segmentUrl] of getDirectDashChildren(
-    segmentList,
-    'SegmentURL',
-  ).entries()) {
+  for (const [segmentIndex, segmentUrl] of segmentUrls.entries()) {
     const media = segmentUrl.getAttribute('media');
     if (!media) continue;
+
+    const duration = timelineEntries?.[segmentIndex]?.duration ?? fixedDuration / timescale;
+    if (!Number.isFinite(duration)) {
+      break;
+    }
 
     const segment = createDashRangedSegment(
       combineUrl(segmentBaseUrl, media),
       segmentIndex,
       segmentUrl.getAttribute('mediaRange'),
     );
-    segment.duration = duration / timescale;
+    segment.timestamp = timelineEntries?.[segmentIndex]?.timestamp;
+    segment.duration = duration;
     appendDashSegment(track, segment);
   }
 };
@@ -504,6 +545,7 @@ const appendTemplatedSegment = (params: {
 
   appendDashSegment(track, {
     sequenceNumber: index,
+    timestamp: currentTime / timescale,
     duration: duration / timescale,
     url: combineUrl(segBaseUrl, replaceDashVariables(mediaTemplate, variables)),
     encryption: null,
@@ -613,6 +655,7 @@ const applyFixedDurationTemplate = (params: {
 
     appendDashSegment(track, {
       sequenceNumber: isLive ? number : segmentIndex++,
+      timestamp: (number - startNumber) * (duration / timescale),
       duration: duration / timescale,
       url: combineUrl(segBaseUrl, replaceDashVariables(mediaTemplate, variables)),
       encryption: null,

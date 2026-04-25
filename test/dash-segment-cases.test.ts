@@ -21,7 +21,11 @@ test('parse audio-only SegmentBase manifest', async () => {
   expect(segments).toHaveLength(1);
   expect(segments[0]?.location.path).toBe('http://example.com/audio_en_2c_128k_aac.mp4');
   expect(segments[0]?.duration).toBe(60);
-  expect(segments[0]?.initSegment).toBeNull();
+  expect(segments[0]?.initSegment?.location.path).toBe(
+    'http://example.com/audio_en_2c_128k_aac.mp4',
+  );
+  expect(segments[0]?.initSegment?.location.offset).toBe(0);
+  expect(segments[0]?.initSegment?.location.length).toBe(786);
 });
 
 test('parse SegmentList manifest', async () => {
@@ -94,4 +98,41 @@ test('parse SegmentTemplate start numbers and padding', async () => {
   expect(segments[0]?.location.path).toBe('https://example.com/root/segment-video-main-010.m4s');
   expect(segments[1]?.location.path).toBe('https://example.com/root/segment-video-main-011.m4s');
   expect(segments[2]?.location.path).toBe('https://example.com/root/segment-video-main-012.m4s');
+});
+
+test('parse SegmentList timelines with ranged media segments', async () => {
+  using input = createAssetInput('segment-list-timeline.mpd', DASH_FORMATS);
+
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  expect(primaryVideoTrack).not.toBeNull();
+
+  const segments = await primaryVideoTrack!.getSegments();
+  expect(segments).toHaveLength(3);
+  expect(segments.map((segment) => segment.duration)).toEqual([10, 5, 8]);
+  expect(segments.map((segment) => segment.timestamp)).toEqual([50, 60, 65]);
+  expect(segments[0]?.initSegment?.location.path).toBe('https://www.example.com/high/video.mp4');
+  expect(segments[0]?.initSegment?.location.offset).toBe(0);
+  expect(segments[0]?.initSegment?.location.length).toBe(100);
+  expect(segments[0]?.location.path).toBe('https://www.example.com/high/segment-1.ts');
+  expect(segments[0]?.location.offset).toBe(100);
+  expect(segments[0]?.location.length).toBe(100);
+  expect(segments[2]?.location.path).toBe('https://www.example.com/high/segment-3.ts');
+  expect(segments[2]?.location.offset).toBe(250);
+  expect(segments[2]?.location.length).toBe(80);
+});
+
+test('expand SegmentTemplate negative repeats up to the period duration', async () => {
+  using input = createAssetInput('segment-template-negative-repeat.mpd', DASH_FORMATS);
+
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  expect(primaryVideoTrack).not.toBeNull();
+
+  const segments = await primaryVideoTrack!.getSegments();
+  expect(segments).toHaveLength(3);
+  expect(segments.map((segment) => segment.duration)).toEqual([2, 2, 2]);
+  expect(segments.map((segment) => segment.timestamp)).toEqual([0, 2, 4]);
+  expect(segments[0]?.initSegment?.location.path).toBe('https://example.com/repeat/init.mp4');
+  expect(segments[0]?.location.path).toBe('https://example.com/repeat/segment-0.m4s');
+  expect(segments[1]?.location.path).toBe('https://example.com/repeat/segment-2.m4s');
+  expect(segments[2]?.location.path).toBe('https://example.com/repeat/segment-4.m4s');
 });

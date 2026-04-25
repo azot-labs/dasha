@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT6S" minBufferTime="PT2S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4" segmentAlignment="true">
+      <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="11111111-2222-3333-4444-555555555555"/>
+      <ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed" cenc:default_KID="11111111-2222-3333-4444-555555555555">
+        <cenc:pssh>missing-namespace-pssh</cenc:pssh>
+      </ContentProtection>
+      <Representation id="video-main" bandwidth="1000000" codecs="avc1.420015" width="640" height="360">
+        <BaseURL>https://example.com/protected/</BaseURL>
+        <SegmentTemplate initialization="init.mp4" media="segment-$Number$.m4s" duration="2" startNumber="1"/>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

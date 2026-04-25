@@ -29,6 +29,7 @@ export type DashEncryptionData = {
 
 export type DashParsedSegment = {
   sequenceNumber: number | null;
+  timestamp?: number;
   duration: number;
   url: string;
   startRange?: number;
