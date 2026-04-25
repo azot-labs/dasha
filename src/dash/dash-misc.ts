@@ -212,8 +212,14 @@ export const createDashTrackDescriptor = (params: {
     const type = params.contentType || params.mimeType?.split('/')[0];
     if (type === 'video') return { type: 'video', codecString: null };
     if (type === 'audio') return { type: 'audio', codecString: null };
-    if (type === 'text')
-      return { type: 'subtitle', codecString: params.mimeType?.split('/')[1] ?? null };
+    if (type === 'text') {
+      const subtitleCodecString = params.mimeType?.split('/')[1] ?? null;
+      return {
+        type: 'subtitle',
+        codec: subtitleCodecString ? tryParseSubtitleCodec(subtitleCodecString) : undefined,
+        codecString: subtitleCodecString,
+      };
+    }
   }
 
   throw new Error('Unable to determine the type of a track, cannot continue...');
