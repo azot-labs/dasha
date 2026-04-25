@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { DASH_FORMATS } from '../dasha';
+import { DASH_FORMATS } from '../src';
 import { createAssetInput } from './utils';
 
 test('parse encrypt info from mpd without init through the Input API', async () => {

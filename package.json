@@ -11,17 +11,17 @@
     "lint": "oxlint . && oxfmt --check .",
     "fix": "oxlint . --fix && oxfmt --write .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "tsdown dasha.ts --format esm",
+    "build": "tsdown src/index.ts --format esm",
     "prepublishOnly": "pnpm build"
   },
   "type": "module",
-  "main": "./dist/dasha.mjs",
-  "types": "./dist/dasha.d.mts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./dist/dasha.d.mts",
-      "module-sync": "./dist/dasha.mjs",
-      "default": "./dist/dasha.mjs"
+      "types": "./dist/index.d.mts",
+      "module-sync": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
     }
   },
   "repository": {

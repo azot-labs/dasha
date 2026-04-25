@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { DASH, DASH_FORMATS } from '../dasha';
+import { DASH, DASH_FORMATS } from '../src';
 import { createAssetInput, loadAsset } from './utils';
 
 test('parse axinom clear manifest through the Input API', async () => {

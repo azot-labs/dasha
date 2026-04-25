@@ -12,5 +12,5 @@
     "noUncheckedSideEffectImports": true,
     "preserveWatchOutput": true
   },
-  "include": ["*.ts", "lib/**/*.ts"]
+  "include": ["*.ts", "src/**/*.ts"]
 }

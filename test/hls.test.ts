@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { desc, HLS_FORMATS, Input, UrlSource, isInput } from '../dasha';
+import { desc, HLS_FORMATS, Input, UrlSource, isInput } from '../src';
 
 test('parse hls with sample aes', { timeout: 15_000 }, async () => {
   const input = new Input({

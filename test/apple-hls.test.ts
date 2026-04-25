@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { FilePathSource, HLS_FORMATS, Input } from '../dasha';
+import { FilePathSource, HLS_FORMATS, Input } from '../src';
 import { assetPath } from './utils';
 
 test('parse local apple hls master playlist through the Input API', async () => {

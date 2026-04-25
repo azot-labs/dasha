@@ -2,7 +2,7 @@ import { appendFile, readFile, stat, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { Input, UrlSource } from '../dasha';
+import { Input, UrlSource } from '../src';
 
 export const assetPath = (name: string) => path.resolve('./test/assets', name);
 export const assetFileUrl = (name: string) => pathToFileURL(assetPath(name)).toString();

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { DASH_FORMATS } from '../dasha';
+import { DASH_FORMATS } from '../src';
 import { createAssetInput } from './utils';
 
 test('preserve dash track metadata across video, audio, and subtitles', async () => {
