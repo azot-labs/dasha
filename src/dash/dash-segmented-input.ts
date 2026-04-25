@@ -84,12 +84,14 @@ export const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegme
 };
 
 export class DashSegmentedInput {
+  internalTrack: DashInternalTrack;
   demuxer: DashInternalTrack['demuxer'];
   segments: DashSegment[] = [];
   currentUpdateSegmentsPromise: Promise<void> | null = null;
   lastSegmentUpdateTime = -Infinity;
 
-  constructor(readonly internalTrack: DashInternalTrack) {
+  constructor(internalTrack: DashInternalTrack) {
+    this.internalTrack = internalTrack;
     this.demuxer = internalTrack.demuxer;
   }
 

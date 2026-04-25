@@ -39,7 +39,7 @@ export type DashInternalTrack = {
   info: DashTrackInfo;
 };
 
-const DEFAULT_DISPOSITION: TrackDisposition = {
+const DEFAULT_TRACK_DISPOSITION: TrackDisposition = {
   commentary: false,
   default: true,
   forced: false,
@@ -51,7 +51,7 @@ const DEFAULT_DISPOSITION: TrackDisposition = {
 
 const getDisposition = (track: DashParsedTrack): TrackDisposition => {
   return {
-    ...DEFAULT_DISPOSITION,
+    ...DEFAULT_TRACK_DISPOSITION,
     commentary: track.role === ROLE_TYPE.Commentary,
     default: !!track.default,
     forced:
@@ -156,8 +156,12 @@ const getTrackNumber = (internalTrack: DashInternalTrack) => {
   return number;
 };
 
-abstract class DashBaseTrackBacking {
-  constructor(readonly internalTrack: DashInternalTrack) {}
+abstract class DashInputTrackBackingBase {
+  internalTrack: DashInternalTrack;
+
+  constructor(internalTrack: DashInternalTrack) {
+    this.internalTrack = internalTrack;
+  }
 
   abstract getType(): 'video' | 'audio' | 'subtitle';
 
@@ -266,7 +270,7 @@ abstract class DashBaseTrackBacking {
   }
 }
 
-class DashInputVideoTrackBacking extends DashBaseTrackBacking {
+class DashInputVideoTrackBacking extends DashInputTrackBackingBase {
   override internalTrack: DashInternalTrack & {
     info: Extract<DashTrackInfo, { type: 'video' }>;
     track: DashParsedVideoTrack;
@@ -319,7 +323,7 @@ class DashInputVideoTrackBacking extends DashBaseTrackBacking {
   }
 }
 
-class DashInputAudioTrackBacking extends DashBaseTrackBacking {
+class DashInputAudioTrackBacking extends DashInputTrackBackingBase {
   override internalTrack: DashInternalTrack & {
     info: Extract<DashTrackInfo, { type: 'audio' }>;
     track: DashParsedAudioTrack;
@@ -352,7 +356,7 @@ class DashInputAudioTrackBacking extends DashBaseTrackBacking {
   }
 }
 
-class DashInputSubtitleTrackBacking extends DashBaseTrackBacking {
+class DashInputSubtitleTrackBacking extends DashInputTrackBackingBase {
   getType() {
     return 'subtitle' as const;
   }

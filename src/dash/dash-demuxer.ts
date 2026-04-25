@@ -715,6 +715,7 @@ const linkDefaultDashGroups = (tracks: DashParsedTrack[]) => {
 };
 
 export class DashDemuxer {
+  input: MediabunnyInput;
   metadataPromise: Promise<void> | null = null;
   trackBackings: DashInputTrackBacking[] | null = null;
   internalTracks: DashInternalTrack[] | null = null;
@@ -722,11 +723,11 @@ export class DashDemuxer {
   manifestUrl = '';
   originalUrl = '';
   headers: Record<string, string>;
-  #mpdUrl = '';
-  #baseUrl = '';
-  #mpdContent = '';
+  _mpdUrl = '';
+  _baseUrl = '';
 
-  constructor(readonly input: MediabunnyInput) {
+  constructor(input: MediabunnyInput) {
+    this.input = input;
     this.headers = getSourceHeaders(input.source);
   }
 
@@ -735,9 +736,9 @@ export class DashDemuxer {
       const { text, url } = await loadDashManifest(this.input.source);
       this.manifestUrl = url;
       this.originalUrl = url;
-      this.#resetManifestUrls();
+      this._resetManifestUrls();
 
-      const tracks = this.#extractTracks(text.trim());
+      const tracks = this._extractTracks(text.trim());
       const internalTracks = createDashInternalTracks(this, tracks);
 
       this.internalTracks = internalTracks;
@@ -777,7 +778,7 @@ export class DashDemuxer {
     }
 
     const tracks = this.internalTracks?.map((internalTrack) => internalTrack.track) ?? [];
-    await this.#refreshTracks(tracks);
+    await this._refreshTracks(tracks);
   }
 
   async getMimeType() {
@@ -792,22 +793,21 @@ export class DashDemuxer {
     this.segmentedInputs.length = 0;
   }
 
-  #extractTracks(rawText: string): DashParsedTrack[] {
-    const manifest = this.#parseManifest(rawText);
+  _extractTracks(rawText: string): DashParsedTrack[] {
+    const manifest = this._parseManifest(rawText);
     const tracks: DashParsedTrack[] = [];
 
     for (const period of manifest.mpdElement.getElementsByTagName('Period')) {
-      this.#appendPeriodTracks(tracks, manifest, period);
+      this._appendPeriodTracks(tracks, manifest, period);
     }
 
     linkDefaultDashGroups(tracks);
     return tracks;
   }
 
-  #parseManifest(rawText: string): DashManifestInfo {
-    this.#mpdContent = processDashContent(rawText);
-
-    const document = new DOMParser().parseFromString(this.#mpdContent, 'text/xml');
+  _parseManifest(rawText: string): DashManifestInfo {
+    const mpdContent = processDashContent(rawText);
+    const document = new DOMParser().parseFromString(mpdContent, 'text/xml');
     const mpdElement = document.getElementsByTagName('MPD')[0];
     const manifest: DashManifestInfo = {
       mpdElement,
@@ -824,13 +824,13 @@ export class DashDemuxer {
       if (baseUrl.includes('kkbox.com.tw/')) {
         baseUrl = baseUrl.replace('//https:%2F%2F', '//');
       }
-      this.#baseUrl = combineUrl(this.#mpdUrl, baseUrl);
+      this._baseUrl = combineUrl(this._mpdUrl, baseUrl);
     }
 
     return manifest;
   }
 
-  #appendPeriodTracks(
+  _appendPeriodTracks(
     tracks: DashParsedTrack[],
     manifest: DashManifestInfo,
     period: Element,
@@ -838,10 +838,10 @@ export class DashDemuxer {
     const periodDurationSeconds = Temporal.Duration.from(
       period.getAttribute('duration') || manifest.mediaPresentationDuration || 'PT0S',
     ).total('seconds');
-    const periodBaseUrl = extendDashBaseUrl(period, this.#baseUrl);
+    const periodBaseUrl = extendDashBaseUrl(period, this._baseUrl);
 
     for (const adaptationSet of period.getElementsByTagName('AdaptationSet')) {
-      this.#appendAdaptationSetTracks({
+      this._appendAdaptationSetTracks({
         tracks,
         manifest,
         period,
@@ -852,7 +852,7 @@ export class DashDemuxer {
     }
   }
 
-  #appendAdaptationSetTracks(params: {
+  _appendAdaptationSetTracks(params: {
     tracks: DashParsedTrack[];
     manifest: DashManifestInfo;
     period: Element;
@@ -872,7 +872,7 @@ export class DashDemuxer {
       contentType ||= representation.getAttribute('contentType');
       mimeType ||= representation.getAttribute('mimeType');
       const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
-      const track = this.#createTrack({
+      const track = this._createTrack({
         adaptationSet,
         representation,
         period,
@@ -883,7 +883,7 @@ export class DashDemuxer {
         frameRate: adaptationSetFrameRate,
       });
 
-      this.#populateTrackSegments({
+      this._populateTrackSegments({
         adaptationSet,
         representation,
         track,
@@ -897,7 +897,7 @@ export class DashDemuxer {
     }
   }
 
-  #createTrack(params: {
+  _createTrack(params: {
     adaptationSet: Element;
     representation: Element;
     period: Element;
@@ -924,7 +924,7 @@ export class DashDemuxer {
       contentType,
       frameRate,
       isLive: manifest.isLive,
-      manifestUrl: this.#mpdUrl,
+      manifestUrl: this._mpdUrl,
       mimeType,
       originalUrl: this.originalUrl,
       period,
@@ -934,7 +934,7 @@ export class DashDemuxer {
     });
   }
 
-  #populateTrackSegments(params: {
+  _populateTrackSegments(params: {
     adaptationSet: Element;
     representation: Element;
     track: DashParsedTrack;
@@ -972,7 +972,7 @@ export class DashDemuxer {
     applyContentProtection(adaptationSet, representation, track);
   }
 
-  #findMatchingTrack(
+  _findMatchingTrack(
     nextTracks: DashParsedTrack[],
     currentTrack: DashParsedTrack,
   ): DashParsedTrack | undefined {
@@ -989,20 +989,20 @@ export class DashDemuxer {
     return matchingTracks[0];
   }
 
-  async #refreshTracks(tracks: DashParsedTrack[]): Promise<void> {
+  async _refreshTracks(tracks: DashParsedTrack[]): Promise<void> {
     if (!tracks.length) return;
 
-    const response = await this.#fetchManifest(this.manifestUrl).catch(() =>
-      this.#fetchManifest(this.originalUrl),
+    const response = await this._fetchManifest(this.manifestUrl).catch(() =>
+      this._fetchManifest(this.originalUrl),
     );
     const rawText = await response.text();
 
     this.manifestUrl = response.url;
-    this.#resetManifestUrls();
+    this._resetManifestUrls();
 
-    const newTracks = this.#extractTracks(rawText);
+    const newTracks = this._extractTracks(rawText);
     for (const track of tracks) {
-      const nextTrack = this.#findMatchingTrack(newTracks, track);
+      const nextTrack = this._findMatchingTrack(newTracks, track);
       if (!nextTrack) {
         continue;
       }
@@ -1016,7 +1016,7 @@ export class DashDemuxer {
     }
   }
 
-  async #fetchManifest(url: string) {
+  async _fetchManifest(url: string) {
     const response = await fetch(url, { headers: this.headers });
     if (!response.ok) {
       throw new Error(
@@ -1026,9 +1026,9 @@ export class DashDemuxer {
     return response;
   }
 
-  #resetManifestUrls() {
-    this.#mpdUrl = this.manifestUrl;
-    this.#baseUrl = this.#mpdUrl;
+  _resetManifestUrls() {
+    this._mpdUrl = this.manifestUrl;
+    this._baseUrl = this._mpdUrl;
   }
 }
 
