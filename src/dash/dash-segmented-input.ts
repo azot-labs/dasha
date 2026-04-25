@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { DashEncryptionData, DashParsedSegment } from './dash-misc';
-import type { DashInternalTrack } from './dash-track-backing';
+import type { DashInternalTrack } from './dash-demuxer';
 
 export type Segment = {
   timestamp: number;
@@ -46,7 +46,7 @@ const createInitSegment = (
   lastProgramDateTimeSeconds: null,
 });
 
-export const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] => {
+const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] => {
   const mediaSegments = internalTrack.track.mediaSegments;
   if (mediaSegments.length === 0) return [];
 

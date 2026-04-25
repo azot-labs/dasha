@@ -34,22 +34,18 @@ export type DashParsedSegment = {
   startRange?: number;
   expectLength?: number;
   encryption: DashEncryptionData | null;
-  nameFromVar?: string;
 };
 
 type DashTrackCommon = {
   type: DashTrackType;
   codec?: MediaCodec;
   codecString: string | null;
-  manifestUrl: string;
-  originalUrl: string;
   languageCode?: string;
   peakBitrate: number | null;
   averageBitrate: number | null;
   name: string | null;
   default: boolean;
   role?: RoleType;
-  publishTime?: Date;
   groupId: string | null;
   audioGroupId?: string;
   subtitleGroupId?: string;
@@ -200,17 +196,18 @@ export const createDashTrackDescriptor = (params: {
 }): { type: DashTrackType; codec?: MediaCodec; codecString: string | null } => {
   const shouldUseCodecsFromMime =
     params.contentType === 'text' && !params.mimeType?.includes('mp4');
-  const codecs = shouldUseCodecsFromMime ? params.mimeType?.split('/')[1] : params.codecs;
-  if (!params.codecs && codecs) params.codecs = codecs;
+  const codecString =
+    params.codecs ?? (shouldUseCodecsFromMime ? params.mimeType?.split('/')[1] : null);
 
-  if (params.codecs) {
-    const videoCodec = tryParseVideoCodec(params.codecs);
-    if (videoCodec) return { type: 'video', codec: videoCodec, codecString: params.codecs };
-    const audioCodec = tryParseAudioCodec(params.codecs);
-    if (audioCodec) return { type: 'audio', codec: audioCodec, codecString: params.codecs };
-    const subtitleCodec = tryParseSubtitleCodec(params.codecs);
-    if (subtitleCodec)
-      return { type: 'subtitle', codec: subtitleCodec, codecString: params.codecs };
+  if (codecString) {
+    const videoCodec = tryParseVideoCodec(codecString);
+    if (videoCodec) return { type: 'video', codec: videoCodec, codecString };
+
+    const audioCodec = tryParseAudioCodec(codecString);
+    if (audioCodec) return { type: 'audio', codec: audioCodec, codecString };
+
+    const subtitleCodec = tryParseSubtitleCodec(codecString);
+    if (subtitleCodec) return { type: 'subtitle', codec: subtitleCodec, codecString };
   } else {
     const type = params.contentType || params.mimeType?.split('/')[0];
     if (type === 'video') return { type: 'video', codecString: null };

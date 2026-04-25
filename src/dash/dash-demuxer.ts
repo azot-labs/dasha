@@ -2,11 +2,15 @@ import { DOMParser, type Element } from '@xmldom/xmldom';
 import { Temporal } from 'temporal-polyfill';
 import { InputFormat } from 'mediabunny';
 import type {
+  AudioCodec,
+  DurationMetadataRequestOptions,
   EncodedPacket,
   Input as MediabunnyInput,
   MediaCodec,
   MetadataTags,
-  PacketType,
+  PacketRetrievalOptions,
+  TrackDisposition,
+  VideoCodec,
 } from 'mediabunny';
 import { checkIsDescriptive, getDolbyDigitalPlusComplexityIndex, parseChannels } from '../audio';
 import { ENCRYPT_METHODS } from '../encrypt-method';
@@ -39,12 +43,6 @@ import {
   replaceDashVariables,
 } from './dash-misc';
 import { type DashSegment, DashSegmentedInput } from './dash-segmented-input';
-import {
-  createDashInternalTracks,
-  createDashTrackBackings,
-  type DashInputTrackBacking,
-  type DashInternalTrack,
-} from './dash-track-backing';
 
 export type { DashSegment } from './dash-segmented-input';
 export { DashSegmentedInput } from './dash-segmented-input';
@@ -63,8 +61,57 @@ type DashManifestInfo = {
   isLive: boolean;
   availabilityStartTime: string | null;
   timeShiftBufferDepth: string;
-  publishTime: string | null;
   mediaPresentationDuration: string | null;
+};
+
+type DashTrackInfo =
+  | {
+      type: 'video';
+      width: number | null;
+      height: number | null;
+    }
+  | {
+      type: 'audio';
+      numberOfChannels: number | null;
+    }
+  | {
+      type: 'subtitle';
+    };
+
+type InternalTrack = {
+  id: number;
+  demuxer: DashDemuxer;
+  backingTrack: DashInputTrackBacking | null;
+  pairingMask: bigint;
+  track: DashParsedTrack;
+  info: DashTrackInfo;
+};
+
+type InternalVideoTrack = InternalTrack & {
+  info: Extract<DashTrackInfo, { type: 'video' }>;
+  track: Extract<DashParsedTrack, { type: 'video' }>;
+};
+
+type InternalAudioTrack = InternalTrack & {
+  info: Extract<DashTrackInfo, { type: 'audio' }>;
+  track: Extract<DashParsedTrack, { type: 'audio' }>;
+};
+
+type InternalSubtitleTrack = InternalTrack & {
+  info: Extract<DashTrackInfo, { type: 'subtitle' }>;
+  track: Extract<DashParsedTrack, { type: 'subtitle' }>;
+};
+
+export type DashInternalTrack = InternalTrack;
+
+const DEFAULT_TRACK_DISPOSITION: TrackDisposition = {
+  commentary: false,
+  default: true,
+  forced: false,
+  hearingImpaired: false,
+  original: false,
+  primary: true,
+  visuallyImpaired: false,
 };
 
 const isMissingNamespace = (rawText: string, tag: string) =>
@@ -91,6 +138,109 @@ const processDashContent = (mpdContent: string) => {
 
 const getDashRefreshIntervalMs = (timeShiftBufferDepth: string) =>
   Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2;
+
+const getDisposition = (track: DashParsedTrack): TrackDisposition => ({
+  ...DEFAULT_TRACK_DISPOSITION,
+  commentary: track.role === ROLE_TYPE.Commentary,
+  default: !!track.default,
+  forced: track.role === ROLE_TYPE.ForcedSubtitle || !!(track.type === 'subtitle' && track.forced),
+  hearingImpaired: !!(track.type === 'subtitle' && track.sdh),
+  visuallyImpaired: !!(track.type === 'audio' && track.descriptive),
+});
+
+const canPairTracks = (left: DashParsedTrack, right: DashParsedTrack) => {
+  if (left === right || left.type === right.type) {
+    return false;
+  }
+
+  if (left.type === 'video' && right.type === 'audio') {
+    return !left.audioGroupId || left.audioGroupId === right.groupId;
+  }
+
+  if (left.type === 'audio' && right.type === 'video') {
+    return !right.audioGroupId || right.audioGroupId === left.groupId;
+  }
+
+  if (left.type === 'video' && right.type === 'subtitle') {
+    return !left.subtitleGroupId || left.subtitleGroupId === right.groupId;
+  }
+
+  if (left.type === 'subtitle' && right.type === 'video') {
+    return !right.subtitleGroupId || right.subtitleGroupId === left.groupId;
+  }
+
+  return false;
+};
+
+const createPairingMasks = (tracks: DashParsedTrack[]) => {
+  const masks = new Map<DashParsedTrack, bigint>();
+  let nextPairIndex = 0;
+
+  for (const [leftIndex, left] of tracks.entries()) {
+    for (const right of tracks.slice(leftIndex + 1)) {
+      if (!canPairTracks(left, right)) {
+        continue;
+      }
+
+      const bit = 1n << BigInt(nextPairIndex++);
+      masks.set(left, (masks.get(left) ?? 0n) | bit);
+      masks.set(right, (masks.get(right) ?? 0n) | bit);
+    }
+  }
+
+  return masks;
+};
+
+const createTrackInfo = (track: DashParsedTrack): DashTrackInfo => {
+  if (track.type === 'video') {
+    return {
+      type: 'video',
+      width: track.width ?? null,
+      height: track.height ?? null,
+    };
+  }
+
+  if (track.type === 'audio') {
+    return {
+      type: 'audio',
+      numberOfChannels: track.numberOfChannels ?? null,
+    };
+  }
+
+  return { type: 'subtitle' };
+};
+
+const createInternalTracks = (demuxer: DashDemuxer, tracks: DashParsedTrack[]): InternalTrack[] => {
+  const pairingMasks = createPairingMasks(tracks);
+
+  return tracks.map((track, index) => ({
+    id: index + 1,
+    demuxer,
+    backingTrack: null,
+    pairingMask: pairingMasks.get(track) ?? 0n,
+    track,
+    info: createTrackInfo(track),
+  }));
+};
+
+const getTrackNumber = (internalTrack: InternalTrack) => {
+  const internalTracks = internalTrack.demuxer.internalTracks;
+  if (!internalTracks) {
+    return 1;
+  }
+
+  let number = 0;
+  for (const track of internalTracks) {
+    if (track.info.type === internalTrack.info.type) {
+      number++;
+    }
+    if (track === internalTrack) {
+      break;
+    }
+  }
+
+  return number;
+};
 
 const addWholeResourceSegment = (track: DashParsedTrack, url: string, duration: number) => {
   track.mediaSegments.push({
@@ -138,11 +288,8 @@ const createDashTrack = (params: {
   contentType: string | null;
   frameRate: number | undefined;
   isLive: boolean;
-  manifestUrl: string;
   mimeType: string | null;
-  originalUrl: string;
   period: Element;
-  publishTime: string | null;
   representation: Element;
   timeShiftBufferDepth: string;
 }) => {
@@ -151,11 +298,8 @@ const createDashTrack = (params: {
     contentType,
     frameRate,
     isLive,
-    manifestUrl,
     mimeType,
-    originalUrl,
     period,
-    publishTime,
     representation,
     timeShiftBufferDepth,
   } = params;
@@ -169,8 +313,6 @@ const createDashTrack = (params: {
     type: descriptor.type,
     codec: descriptor.codec,
     codecString: descriptor.codecString,
-    manifestUrl,
-    originalUrl,
     peakBitrate: bitrate,
     averageBitrate: bitrate,
     name: null,
@@ -245,10 +387,6 @@ const createDashTrack = (params: {
   const role = roles[0];
   if (role?.value) {
     track.role = getRoleType(role.value);
-  }
-
-  if (publishTime) {
-    track.publishTime = new Date(publishTime);
   }
 
   return track;
@@ -351,7 +489,6 @@ const applySegmentList = (params: {
 const appendTemplatedSegment = (params: {
   currentTime: number;
   duration: number;
-  hasTimePlaceholder: boolean;
   index: number;
   mediaTemplate: string;
   track: DashParsedTrack;
@@ -360,7 +497,7 @@ const appendTemplatedSegment = (params: {
   timescale: number;
   variables: Record<string, string>;
 }) => {
-  const { currentTime, duration, hasTimePlaceholder, index, mediaTemplate, track } = params;
+  const { currentTime, duration, index, mediaTemplate, track } = params;
   const { segmentNumber, segBaseUrl, timescale, variables } = params;
   variables[DASH_TEMPLATE_TIME] = String(currentTime);
   variables[DASH_TEMPLATE_NUMBER] = String(segmentNumber);
@@ -370,7 +507,6 @@ const appendTemplatedSegment = (params: {
     duration: duration / timescale,
     url: combineUrl(segBaseUrl, replaceDashVariables(mediaTemplate, variables)),
     encryption: null,
-    ...(hasTimePlaceholder ? { nameFromVar: String(currentTime) } : {}),
   });
 };
 
@@ -388,7 +524,6 @@ const applySegmentTimeline = (params: {
   const { startNumberString, timeline, timescaleString, variables } = params;
   const timelineEntries = getDirectDashChildren(timeline, 'S');
   const timescale = Number(timescaleString);
-  const hasTimePlaceholder = mediaTemplate.includes(DASH_TEMPLATE_TIME);
   let segmentNumber = Number(startNumberString);
   let currentTime = 0;
   let segmentIndex = 0;
@@ -403,7 +538,6 @@ const applySegmentTimeline = (params: {
     appendTemplatedSegment({
       currentTime,
       duration,
-      hasTimePlaceholder,
       index: segmentIndex++,
       mediaTemplate,
       track,
@@ -422,7 +556,6 @@ const applySegmentTimeline = (params: {
       appendTemplatedSegment({
         currentTime,
         duration,
-        hasTimePlaceholder,
         index: segmentIndex++,
         mediaTemplate,
         track,
@@ -457,7 +590,6 @@ const applyFixedDurationTemplate = (params: {
   const { timescaleString, track, variables } = params;
   const timescale = Number(timescaleString);
   const duration = Number(durationString);
-  const hasNumberPlaceholder = mediaTemplate.includes(DASH_TEMPLATE_NUMBER);
   let startNumber = Number(startNumberString);
   let totalNumber = Math.ceil((periodDurationSeconds * timescale) / duration);
 
@@ -484,7 +616,6 @@ const applyFixedDurationTemplate = (params: {
       duration: duration / timescale,
       url: combineUrl(segBaseUrl, replaceDashVariables(mediaTemplate, variables)),
       encryption: null,
-      ...(hasNumberPlaceholder ? { nameFromVar: String(number) } : {}),
     });
   }
 };
@@ -493,17 +624,24 @@ const applySegmentTemplate = (params: {
   adaptationSet: Element;
   availabilityStartTime: string | null;
   bitrate: number;
-  groupId: string | null;
   isLive: boolean;
   period: Element;
   periodDurationSeconds: number;
+  representationId: string | null;
   representation: Element;
   segBaseUrl: string;
   track: DashParsedTrack;
   timeShiftBufferDepth: string;
 }) => {
-  const { adaptationSet, availabilityStartTime, bitrate, groupId, isLive, period } = params;
-  const { periodDurationSeconds, representation, segBaseUrl, track, timeShiftBufferDepth } = params;
+  const { adaptationSet, availabilityStartTime, bitrate, isLive, period } = params;
+  const {
+    periodDurationSeconds,
+    representation,
+    representationId,
+    segBaseUrl,
+    track,
+    timeShiftBufferDepth,
+  } = params;
   const segmentTemplates = [
     getDirectDashChild(representation, 'SegmentTemplate'),
     getDirectDashChild(adaptationSet, 'SegmentTemplate'),
@@ -535,7 +673,7 @@ const applySegmentTemplate = (params: {
 
   const variables: Record<string, string> = {
     [DASH_TEMPLATE_BANDWIDTH]: String(bitrate),
-    [DASH_TEMPLATE_REPRESENTATION_ID]: groupId ?? '',
+    [DASH_TEMPLATE_REPRESENTATION_ID]: representationId ?? '',
   };
 
   const presentationTimeOffset = getTemplateAttribute('presentationTimeOffset') || '0';
@@ -725,13 +863,13 @@ export class DashDemuxer {
   input: MediabunnyInput;
   metadataPromise: Promise<void> | null = null;
   trackBackings: DashInputTrackBacking[] | null = null;
-  internalTracks: DashInternalTrack[] | null = null;
+  internalTracks: InternalTrack[] | null = null;
   segmentedInputs: DashSegmentedInput[] = [];
   manifestUrl = '';
   originalUrl = '';
   headers: Record<string, string>;
-  _mpdUrl = '';
-  _baseUrl = '';
+  mpdUrl = '';
+  baseUrl = '';
 
   constructor(input: MediabunnyInput) {
     this.input = input;
@@ -743,13 +881,13 @@ export class DashDemuxer {
       const { text, url } = await loadDashManifest(this.input.source);
       this.manifestUrl = url;
       this.originalUrl = url;
-      this._resetManifestUrls();
+      this.resetManifestUrls();
 
-      const tracks = this._extractTracks(text.trim());
-      const internalTracks = createDashInternalTracks(this, tracks);
+      const tracks = this.extractTracks(text.trim());
+      const internalTracks = createInternalTracks(this, tracks);
 
       this.internalTracks = internalTracks;
-      this.trackBackings = createDashTrackBackings(internalTracks);
+      this.trackBackings = createTrackBackings(internalTracks);
     })());
   }
 
@@ -785,7 +923,7 @@ export class DashDemuxer {
     }
 
     const tracks = this.internalTracks?.map((internalTrack) => internalTrack.track) ?? [];
-    await this._refreshTracks(tracks);
+    await this.refreshTracks(tracks);
   }
 
   async getMimeType() {
@@ -800,19 +938,19 @@ export class DashDemuxer {
     this.segmentedInputs.length = 0;
   }
 
-  _extractTracks(rawText: string): DashParsedTrack[] {
-    const manifest = this._parseManifest(rawText);
+  extractTracks(rawText: string): DashParsedTrack[] {
+    const manifest = this.parseManifest(rawText);
     const tracks: DashParsedTrack[] = [];
 
     for (const period of getDirectDashChildren(manifest.mpdElement, 'Period')) {
-      this._appendPeriodTracks(tracks, manifest, period);
+      this.appendPeriodTracks(tracks, manifest, period);
     }
 
     linkDefaultDashGroups(tracks);
     return tracks;
   }
 
-  _parseManifest(rawText: string): DashManifestInfo {
+  parseManifest(rawText: string): DashManifestInfo {
     const mpdContent = processDashContent(rawText);
     const document = new DOMParser().parseFromString(mpdContent, 'text/xml');
     const mpdElement = document.getElementsByTagName('MPD')[0];
@@ -821,7 +959,6 @@ export class DashDemuxer {
       isLive: mpdElement.getAttribute('type') === 'dynamic',
       availabilityStartTime: mpdElement.getAttribute('availabilityStartTime'),
       timeShiftBufferDepth: mpdElement.getAttribute('timeShiftBufferDepth') || 'PT1M',
-      publishTime: mpdElement.getAttribute('publishTime'),
       mediaPresentationDuration: mpdElement.getAttribute('mediaPresentationDuration'),
     };
 
@@ -831,24 +968,20 @@ export class DashDemuxer {
       if (baseUrl.includes('kkbox.com.tw/')) {
         baseUrl = baseUrl.replace('//https:%2F%2F', '//');
       }
-      this._baseUrl = combineUrl(this._mpdUrl, baseUrl);
+      this.baseUrl = combineUrl(this.mpdUrl, baseUrl);
     }
 
     return manifest;
   }
 
-  _appendPeriodTracks(
-    tracks: DashParsedTrack[],
-    manifest: DashManifestInfo,
-    period: Element,
-  ): void {
+  appendPeriodTracks(tracks: DashParsedTrack[], manifest: DashManifestInfo, period: Element): void {
     const periodDurationSeconds = Temporal.Duration.from(
       period.getAttribute('duration') || manifest.mediaPresentationDuration || 'PT0S',
     ).total('seconds');
-    const periodBaseUrl = extendDashBaseUrl(period, this._baseUrl);
+    const periodBaseUrl = extendDashBaseUrl(period, this.baseUrl);
 
     for (const adaptationSet of getDirectDashChildren(period, 'AdaptationSet')) {
-      this._appendAdaptationSetTracks({
+      this.appendAdaptationSetTracks({
         tracks,
         manifest,
         period,
@@ -859,7 +992,7 @@ export class DashDemuxer {
     }
   }
 
-  _appendAdaptationSetTracks(params: {
+  appendAdaptationSetTracks(params: {
     tracks: DashParsedTrack[];
     manifest: DashManifestInfo;
     period: Element;
@@ -879,7 +1012,7 @@ export class DashDemuxer {
       contentType ||= representation.getAttribute('contentType');
       mimeType ||= representation.getAttribute('mimeType');
       const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
-      const track = this._createTrack({
+      const track = this.createTrack({
         adaptationSet,
         representation,
         period,
@@ -890,7 +1023,7 @@ export class DashDemuxer {
         frameRate: adaptationSetFrameRate,
       });
 
-      this._populateTrackSegments({
+      this.populateTrackSegments({
         adaptationSet,
         period,
         representation,
@@ -905,7 +1038,7 @@ export class DashDemuxer {
     }
   }
 
-  _createTrack(params: {
+  createTrack(params: {
     adaptationSet: Element;
     representation: Element;
     period: Element;
@@ -932,17 +1065,14 @@ export class DashDemuxer {
       contentType,
       frameRate,
       isLive: manifest.isLive,
-      manifestUrl: this._mpdUrl,
       mimeType,
-      originalUrl: this.originalUrl,
       period,
-      publishTime: manifest.publishTime,
       representation,
       timeShiftBufferDepth: manifest.timeShiftBufferDepth,
     });
   }
 
-  _populateTrackSegments(params: {
+  populateTrackSegments(params: {
     adaptationSet: Element;
     period: Element;
     representation: Element;
@@ -969,10 +1099,10 @@ export class DashDemuxer {
       adaptationSet,
       availabilityStartTime: manifest.availabilityStartTime,
       bitrate,
-      groupId: track.groupId,
       isLive: manifest.isLive,
       period,
       periodDurationSeconds,
+      representationId: representation.getAttribute('id'),
       representation,
       segBaseUrl: segmentBaseUrl,
       track,
@@ -983,7 +1113,7 @@ export class DashDemuxer {
     applyContentProtection(adaptationSet, representation, track);
   }
 
-  _findMatchingTrack(
+  findMatchingTrack(
     nextTracks: DashParsedTrack[],
     currentTrack: DashParsedTrack,
   ): DashParsedTrack | undefined {
@@ -999,20 +1129,22 @@ export class DashDemuxer {
     return matchingTracks[0];
   }
 
-  async _refreshTracks(tracks: DashParsedTrack[]): Promise<void> {
-    if (!tracks.length) return;
+  async refreshTracks(tracks: DashParsedTrack[]): Promise<void> {
+    if (!tracks.length) {
+      return;
+    }
 
-    const response = await this._fetchManifest(this.manifestUrl).catch(() =>
-      this._fetchManifest(this.originalUrl),
+    const response = await this.fetchManifest(this.manifestUrl).catch(() =>
+      this.fetchManifest(this.originalUrl),
     );
     const rawText = await response.text();
 
     this.manifestUrl = response.url;
-    this._resetManifestUrls();
+    this.resetManifestUrls();
 
-    const newTracks = this._extractTracks(rawText);
+    const nextTracks = this.extractTracks(rawText);
     for (const track of tracks) {
-      const nextTrack = this._findMatchingTrack(newTracks, track);
+      const nextTrack = this.findMatchingTrack(nextTracks, track);
       if (!nextTrack) {
         continue;
       }
@@ -1021,15 +1153,12 @@ export class DashDemuxer {
       track.refreshIntervalMs = nextTrack.refreshIntervalMs;
       track.initSegment = nextTrack.initSegment;
       track.mediaSegments = nextTrack.mediaSegments;
-      track.publishTime = nextTrack.publishTime;
-      track.manifestUrl = nextTrack.manifestUrl;
-      track.originalUrl = nextTrack.originalUrl;
       track.audioGroupId = nextTrack.audioGroupId;
       track.subtitleGroupId = nextTrack.subtitleGroupId;
     }
   }
 
-  async _fetchManifest(url: string) {
+  async fetchManifest(url: string) {
     const response = await fetch(url, { headers: this.headers });
     if (!response.ok) {
       throw new Error(
@@ -1039,11 +1168,227 @@ export class DashDemuxer {
     return response;
   }
 
-  _resetManifestUrls() {
-    this._mpdUrl = this.manifestUrl;
-    this._baseUrl = this._mpdUrl;
+  resetManifestUrls() {
+    this.mpdUrl = this.manifestUrl;
+    this.baseUrl = this.mpdUrl;
   }
 }
+
+abstract class DashTrackBackingBase {
+  internalTrack: InternalTrack;
+
+  constructor(internalTrack: InternalTrack) {
+    this.internalTrack = internalTrack;
+  }
+
+  abstract getType(): 'video' | 'audio' | 'subtitle';
+
+  getId() {
+    return this.internalTrack.id;
+  }
+
+  getNumber() {
+    return getTrackNumber(this.internalTrack);
+  }
+
+  getCodec(): MediaCodec | null {
+    return (this.internalTrack.track.codec as MediaCodec | undefined) ?? null;
+  }
+
+  getInternalCodecId() {
+    return null;
+  }
+
+  getName() {
+    return this.internalTrack.track.name;
+  }
+
+  getLanguageCode() {
+    return this.internalTrack.track.languageCode ?? 'und';
+  }
+
+  getTimeResolution() {
+    return 1;
+  }
+
+  isRelativeToUnixEpoch() {
+    return false;
+  }
+
+  getDisposition() {
+    return getDisposition(this.internalTrack.track);
+  }
+
+  getPairingMask() {
+    return this.internalTrack.pairingMask;
+  }
+
+  getBitrate() {
+    return this.internalTrack.track.peakBitrate;
+  }
+
+  getAverageBitrate() {
+    return this.internalTrack.track.averageBitrate;
+  }
+
+  async getDurationFromMetadata(_options: DurationMetadataRequestOptions) {
+    return this.internalTrack.track.mediaSegments.reduce(
+      (sum, segment) => sum + segment.duration,
+      0,
+    );
+  }
+
+  async getLiveRefreshInterval() {
+    if (!this.internalTrack.track.isLive) {
+      return null;
+    }
+
+    return this.internalTrack.track.refreshIntervalMs / 1000;
+  }
+
+  getHasOnlyKeyPackets() {
+    return false;
+  }
+
+  async getDecoderConfig() {
+    return null;
+  }
+
+  getMetadataCodecParameterString() {
+    return this.internalTrack.track.codecString;
+  }
+
+  async getFirstPacket(_options: PacketRetrievalOptions) {
+    return null;
+  }
+
+  async getPacket(_timestamp: number, _options: PacketRetrievalOptions) {
+    return null;
+  }
+
+  async getNextPacket(_packet: EncodedPacket, _options: PacketRetrievalOptions) {
+    return null;
+  }
+
+  async getKeyPacket(_timestamp: number, _options: PacketRetrievalOptions) {
+    return null;
+  }
+
+  async getNextKeyPacket(_packet: EncodedPacket, _options: PacketRetrievalOptions) {
+    return null;
+  }
+
+  getSegmentedInput() {
+    return this.internalTrack.demuxer.getSegmentedInputForTrack(this.internalTrack);
+  }
+
+  async getSegments(): Promise<DashSegment[]> {
+    const segmentedInput = this.getSegmentedInput();
+    await segmentedInput.runUpdateSegments();
+    return segmentedInput.segments;
+  }
+}
+
+class DashInputVideoTrackBacking extends DashTrackBackingBase {
+  override internalTrack: InternalVideoTrack;
+
+  constructor(internalTrack: InternalVideoTrack) {
+    super(internalTrack);
+    this.internalTrack = internalTrack;
+  }
+
+  getType() {
+    return 'video' as const;
+  }
+
+  override getCodec(): VideoCodec | null {
+    return this.internalTrack.track.codec as VideoCodec | null;
+  }
+
+  getCodedWidth() {
+    return this.internalTrack.info.width ?? 0;
+  }
+
+  getCodedHeight() {
+    return this.internalTrack.info.height ?? 0;
+  }
+
+  getSquarePixelWidth() {
+    return this.internalTrack.info.width ?? 0;
+  }
+
+  getSquarePixelHeight() {
+    return this.internalTrack.info.height ?? 0;
+  }
+
+  getRotation() {
+    return 0;
+  }
+
+  async getColorSpace(): Promise<VideoColorSpaceInit> {
+    return {};
+  }
+
+  async canBeTransparent() {
+    return false;
+  }
+}
+
+class DashInputAudioTrackBacking extends DashTrackBackingBase {
+  override internalTrack: InternalAudioTrack;
+
+  constructor(internalTrack: InternalAudioTrack) {
+    super(internalTrack);
+    this.internalTrack = internalTrack;
+  }
+
+  getType() {
+    return 'audio' as const;
+  }
+
+  override getCodec(): AudioCodec | null {
+    return this.internalTrack.track.codec as AudioCodec | null;
+  }
+
+  getNumberOfChannels() {
+    return this.internalTrack.info.numberOfChannels ?? 0;
+  }
+
+  getSampleRate() {
+    return this.internalTrack.track.sampleRate ?? 0;
+  }
+}
+
+class DashInputSubtitleTrackBacking extends DashTrackBackingBase {
+  override internalTrack: InternalSubtitleTrack;
+
+  constructor(internalTrack: InternalSubtitleTrack) {
+    super(internalTrack);
+    this.internalTrack = internalTrack;
+  }
+
+  getType() {
+    return 'subtitle' as const;
+  }
+}
+
+type DashInputTrackBacking =
+  | DashInputVideoTrackBacking
+  | DashInputAudioTrackBacking
+  | DashInputSubtitleTrackBacking;
+
+const createTrackBackings = (internalTracks: InternalTrack[]) =>
+  internalTracks.map((internalTrack) => {
+    const backing =
+      internalTrack.info.type === 'video'
+        ? new DashInputVideoTrackBacking(internalTrack as InternalVideoTrack)
+        : internalTrack.info.type === 'audio'
+          ? new DashInputAudioTrackBacking(internalTrack as InternalAudioTrack)
+          : new DashInputSubtitleTrackBacking(internalTrack as InternalSubtitleTrack);
+
+    internalTrack.backingTrack = backing;
+    return backing;
+  });
 
 export class DashInputFormat extends InputFormat {
   get name() {
@@ -1069,17 +1414,6 @@ export class DashInputFormat extends InputFormat {
     return new DashDemuxer(input);
   }
 }
-
-export type DashInputSubtitleTrack = {
-  readonly type: 'subtitle';
-  getCodec(): Promise<MediaCodec | null>;
-  getCodecParameterString(): Promise<string | null>;
-  getSegmentedInput(): DashSegmentedInput;
-  getSegments(): Promise<DashSegment[]>;
-  isVideoTrack(): false;
-  isAudioTrack(): false;
-  determinePacketType(packet: EncodedPacket): Promise<PacketType | null>;
-};
 
 export const DASH = new DashInputFormat();
 export const DASH_FORMATS: InputFormat[] = [DASH];
