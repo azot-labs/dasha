@@ -1,25 +1,49 @@
 import type {
   AudioCodec,
+  DurationMetadataRequestOptions,
   EncodedPacket,
   MediaCodec,
-  Source,
+  PacketRetrievalOptions,
   TrackDisposition,
   VideoCodec,
 } from 'mediabunny';
 import { ROLE_TYPE } from '../shared/role-type';
-import type {
-  AudioStreamInfo,
-  MediaStreamInfo,
-  SubtitleStreamInfo,
-  VideoStreamInfo,
-} from '../shared/stream-info';
-import { DashManifestParser } from './dash-manifest-parser';
-import { DASH_MIME_TYPE, getSourceHeaders, loadDashManifest } from './dash-misc';
-import {
-  DashSegmentedInput,
-  playlistToDashSegments,
-  type DashSegmentSource,
-} from './dash-segmented-input';
+import type { AudioStreamInfo, MediaStreamInfo, SubtitleStreamInfo } from '../shared/stream-info';
+import { DashSegmentedInput, type DashSegment } from './dash-segmented-input';
+
+type DashTrackInfo =
+  | {
+      type: 'video';
+      width: number | null;
+      height: number | null;
+    }
+  | {
+      type: 'audio';
+      numberOfChannels: number | null;
+    }
+  | {
+      type: 'subtitle';
+    };
+
+export type DashTrackOwner = {
+  internalTracks: DashInternalTrack[] | null;
+  getSegmentedInputForTrack(track: DashInternalTrack): DashSegmentedInput;
+  refreshTrackSegments(track: DashInternalTrack): Promise<void>;
+};
+
+export type DashInternalTrack = {
+  id: number;
+  demuxer: DashTrackOwner;
+  default: boolean;
+  languageCode: string;
+  fullCodecString: string | null;
+  pairingMask: bigint;
+  peakBitrate: number | null;
+  averageBitrate: number | null;
+  name: string | null;
+  streamInfo: MediaStreamInfo;
+  info: DashTrackInfo;
+};
 
 const DEFAULT_DISPOSITION: TrackDisposition = {
   commentary: false,
@@ -85,108 +109,82 @@ const createPairingMasks = (streams: MediaStreamInfo[]) => {
   return masks;
 };
 
-type LoadedDashSession = {
-  parser: DashManifestParser;
-  streams: MediaStreamInfo[];
-  trackBackings: DashInputTrackBacking[];
+const createTrackInfo = (streamInfo: MediaStreamInfo): DashTrackInfo => {
+  if (streamInfo.type === 'video') {
+    return {
+      type: 'video',
+      width: streamInfo.width ?? null,
+      height: streamInfo.height ?? null,
+    };
+  }
+
+  if (streamInfo.type === 'audio') {
+    return {
+      type: 'audio',
+      numberOfChannels: streamInfo.numberOfChannels ?? null,
+    };
+  }
+
+  return {
+    type: 'subtitle',
+  };
 };
 
-export class DashSession {
-  readonly source: Source;
+export const createDashInternalTracks = (
+  demuxer: DashTrackOwner,
+  streams: MediaStreamInfo[],
+): DashInternalTrack[] => {
+  const pairingMasks = createPairingMasks(streams);
 
-  #disposed = false;
-  #loadPromise?: Promise<LoadedDashSession>;
+  return streams.map((streamInfo, index) => ({
+    id: index + 1,
+    demuxer,
+    default: !!streamInfo.default,
+    languageCode: streamInfo.languageCode ?? 'und',
+    fullCodecString: streamInfo.codecs,
+    pairingMask: pairingMasks.get(streamInfo) ?? 0n,
+    peakBitrate: streamInfo.bitrate ?? null,
+    averageBitrate: streamInfo.bitrate ?? null,
+    name: streamInfo.name ?? null,
+    streamInfo,
+    info: createTrackInfo(streamInfo),
+  }));
+};
 
-  constructor(source: Source) {
-    this.source = source;
+const getTrackNumber = (internalTrack: DashInternalTrack) => {
+  const internalTracks = internalTrack.demuxer.internalTracks;
+  if (!internalTracks) {
+    return 1;
   }
 
-  async load(): Promise<LoadedDashSession> {
-    if (this.#disposed) {
-      throw new Error('Input has been disposed.');
+  let number = 0;
+  for (const track of internalTracks) {
+    if (track.info.type === internalTrack.info.type) {
+      number++;
     }
-
-    this.#loadPromise ??= (async () => {
-      const { text, url } = await loadDashManifest(this.source);
-      const parser = new DashManifestParser({
-        headers: getSourceHeaders(this.source),
-        originalUrl: url,
-        url,
-      });
-      const streams = await parser.extractStreams(text.trim());
-      const pairingMasks = createPairingMasks(streams);
-      const typeNumbers = { audio: 1, subtitle: 1, video: 1 };
-      const trackBackings: DashInputTrackBacking[] = [];
-
-      for (const [index, stream] of streams.entries()) {
-        const number = typeNumbers[stream.type]++;
-        const pairingMask = pairingMasks.get(stream) ?? 0n;
-
-        if (stream.type === 'video') {
-          trackBackings.push(
-            new DashInputVideoTrackBacking(this, stream, index + 1, number, pairingMask),
-          );
-        } else if (stream.type === 'audio') {
-          trackBackings.push(
-            new DashInputAudioTrackBacking(this, stream, index + 1, number, pairingMask),
-          );
-        } else {
-          trackBackings.push(
-            new DashInputSubtitleTrackBacking(this, stream, index + 1, number, pairingMask),
-          );
-        }
-      }
-
-      return { parser, streams, trackBackings };
-    })();
-
-    return this.#loadPromise;
-  }
-
-  async refreshSegments(streamInfo: MediaStreamInfo): Promise<void> {
-    const { parser, streams } = await this.load();
-    if (!streamInfo.playlist?.isLive) return;
-    if (!parser.manifestUrl.startsWith('http://') && !parser.manifestUrl.startsWith('https://')) {
-      return;
+    if (track === internalTrack) {
+      break;
     }
-
-    await parser.refreshPlaylist(streams);
   }
 
-  dispose() {
-    this.#disposed = true;
-  }
-}
+  return number;
+};
 
-abstract class DashTrackBacking implements DashSegmentSource {
-  readonly session: DashSession;
-  readonly streamInfo: MediaStreamInfo;
-
-  #segmentedInput?: DashSegmentedInput;
-
-  constructor(
-    session: DashSession,
-    streamInfo: MediaStreamInfo,
-    private readonly id: number,
-    private readonly number: number,
-    private readonly pairingMask: bigint,
-  ) {
-    this.session = session;
-    this.streamInfo = streamInfo;
-  }
+abstract class DashBaseTrackBacking {
+  constructor(readonly internalTrack: DashInternalTrack) {}
 
   abstract getType(): 'video' | 'audio' | 'subtitle';
 
   getId() {
-    return this.id;
+    return this.internalTrack.id;
   }
 
   getNumber() {
-    return this.number;
+    return getTrackNumber(this.internalTrack);
   }
 
   getCodec(): MediaCodec | null {
-    return this.streamInfo.codec as MediaCodec | null;
+    return this.internalTrack.streamInfo.codec as MediaCodec | null;
   }
 
   getInternalCodecId() {
@@ -194,11 +192,11 @@ abstract class DashTrackBacking implements DashSegmentSource {
   }
 
   getName() {
-    return this.streamInfo.name ?? null;
+    return this.internalTrack.name;
   }
 
   getLanguageCode() {
-    return this.streamInfo.languageCode ?? 'und';
+    return this.internalTrack.languageCode;
   }
 
   getTimeResolution() {
@@ -210,32 +208,29 @@ abstract class DashTrackBacking implements DashSegmentSource {
   }
 
   getDisposition() {
-    return getDisposition(this.streamInfo);
+    return getDisposition(this.internalTrack.streamInfo);
   }
 
   getPairingMask() {
-    return this.pairingMask;
+    return this.internalTrack.pairingMask;
   }
 
   getBitrate() {
-    return this.streamInfo.bitrate ?? null;
+    return this.internalTrack.peakBitrate;
   }
 
   getAverageBitrate() {
-    return this.streamInfo.bitrate ?? null;
+    return this.internalTrack.averageBitrate;
   }
 
-  async getDurationFromMetadata() {
-    return this.streamInfo.playlist?.totalDuration ?? null;
+  async getDurationFromMetadata(_options: DurationMetadataRequestOptions) {
+    return this.internalTrack.streamInfo.playlist?.totalDuration ?? null;
   }
 
   async getLiveRefreshInterval() {
-    if (!this.streamInfo.playlist?.isLive) return null;
-    return this.streamInfo.playlist.refreshIntervalMs / 1000;
-  }
-
-  async refreshSegments(streamInfo: MediaStreamInfo) {
-    await this.session.refreshSegments(streamInfo);
+    const playlist = this.internalTrack.streamInfo.playlist;
+    if (!playlist?.isLive) return null;
+    return playlist.refreshIntervalMs / 1000;
   }
 
   getHasOnlyKeyPackets() {
@@ -247,57 +242,48 @@ abstract class DashTrackBacking implements DashSegmentSource {
   }
 
   getMetadataCodecParameterString() {
-    return this.streamInfo.codecs;
+    return this.internalTrack.fullCodecString;
   }
 
-  async getFirstPacket() {
+  async getFirstPacket(_options: PacketRetrievalOptions) {
     return null;
   }
 
-  async getPacket() {
+  async getPacket(_timestamp: number, _options: PacketRetrievalOptions) {
     return null;
   }
 
-  async getNextPacket(_packet: EncodedPacket) {
+  async getNextPacket(_packet: EncodedPacket, _options: PacketRetrievalOptions) {
     return null;
   }
 
-  async getKeyPacket() {
+  async getKeyPacket(_timestamp: number, _options: PacketRetrievalOptions) {
     return null;
   }
 
-  async getNextKeyPacket(_packet: EncodedPacket) {
+  async getNextKeyPacket(_packet: EncodedPacket, _options: PacketRetrievalOptions) {
     return null;
   }
 
   getSegmentedInput() {
-    this.#segmentedInput ??= new DashSegmentedInput(this);
-    return this.#segmentedInput;
+    return this.internalTrack.demuxer.getSegmentedInputForTrack(this.internalTrack);
   }
 
-  async getSegments() {
+  async getSegments(): Promise<DashSegment[]> {
     const segmentedInput = this.getSegmentedInput();
     await segmentedInput.runUpdateSegments();
     return segmentedInput.segments;
   }
-
-  toSegments() {
-    return playlistToDashSegments(this.streamInfo.playlist);
-  }
 }
 
-class DashInputVideoTrackBacking extends DashTrackBacking {
-  override streamInfo: VideoStreamInfo;
+class DashInputVideoTrackBacking extends DashBaseTrackBacking {
+  override internalTrack: DashInternalTrack & { info: Extract<DashTrackInfo, { type: 'video' }> };
 
   constructor(
-    session: DashSession,
-    streamInfo: VideoStreamInfo,
-    id: number,
-    number: number,
-    pairingMask: bigint,
+    internalTrack: DashInternalTrack & { info: Extract<DashTrackInfo, { type: 'video' }> },
   ) {
-    super(session, streamInfo, id, number, pairingMask);
-    this.streamInfo = streamInfo;
+    super(internalTrack);
+    this.internalTrack = internalTrack;
   }
 
   getType() {
@@ -305,23 +291,23 @@ class DashInputVideoTrackBacking extends DashTrackBacking {
   }
 
   override getCodec(): VideoCodec | null {
-    return this.streamInfo.codec as VideoCodec | null;
+    return this.internalTrack.streamInfo.codec as VideoCodec | null;
   }
 
   getCodedWidth() {
-    return this.streamInfo.width ?? 0;
+    return this.internalTrack.info.width ?? 0;
   }
 
   getCodedHeight() {
-    return this.streamInfo.height ?? 0;
+    return this.internalTrack.info.height ?? 0;
   }
 
   getSquarePixelWidth() {
-    return this.streamInfo.width ?? 0;
+    return this.internalTrack.info.width ?? 0;
   }
 
   getSquarePixelHeight() {
-    return this.streamInfo.height ?? 0;
+    return this.internalTrack.info.height ?? 0;
   }
 
   getRotation() {
@@ -337,18 +323,14 @@ class DashInputVideoTrackBacking extends DashTrackBacking {
   }
 }
 
-class DashInputAudioTrackBacking extends DashTrackBacking {
-  override streamInfo: AudioStreamInfo;
+class DashInputAudioTrackBacking extends DashBaseTrackBacking {
+  override internalTrack: DashInternalTrack & { info: Extract<DashTrackInfo, { type: 'audio' }> };
 
   constructor(
-    session: DashSession,
-    streamInfo: AudioStreamInfo,
-    id: number,
-    number: number,
-    pairingMask: bigint,
+    internalTrack: DashInternalTrack & { info: Extract<DashTrackInfo, { type: 'audio' }> },
   ) {
-    super(session, streamInfo, id, number, pairingMask);
-    this.streamInfo = streamInfo;
+    super(internalTrack);
+    this.internalTrack = internalTrack;
   }
 
   getType() {
@@ -356,40 +338,40 @@ class DashInputAudioTrackBacking extends DashTrackBacking {
   }
 
   override getCodec(): AudioCodec | null {
-    return this.streamInfo.codec as AudioCodec | null;
+    return this.internalTrack.streamInfo.codec as AudioCodec | null;
   }
 
   getNumberOfChannels() {
-    return this.streamInfo.numberOfChannels ?? 0;
+    return this.internalTrack.info.numberOfChannels ?? 0;
   }
 
   getSampleRate() {
-    return this.streamInfo.sampleRate ?? 0;
+    return (this.internalTrack.streamInfo as AudioStreamInfo).sampleRate ?? 0;
   }
 }
 
-class DashInputSubtitleTrackBacking extends DashTrackBacking {
-  override streamInfo: SubtitleStreamInfo;
-
-  constructor(
-    session: DashSession,
-    streamInfo: SubtitleStreamInfo,
-    id: number,
-    number: number,
-    pairingMask: bigint,
-  ) {
-    super(session, streamInfo, id, number, pairingMask);
-    this.streamInfo = streamInfo;
-  }
-
+class DashInputSubtitleTrackBacking extends DashBaseTrackBacking {
   getType() {
     return 'subtitle' as const;
   }
 }
 
+export const createDashTrackBackings = (internalTracks: DashInternalTrack[]) =>
+  internalTracks.map((internalTrack) => {
+    if (internalTrack.info.type === 'video') {
+      return new DashInputVideoTrackBacking(
+        internalTrack as DashInternalTrack & { info: Extract<DashTrackInfo, { type: 'video' }> },
+      );
+    }
+    if (internalTrack.info.type === 'audio') {
+      return new DashInputAudioTrackBacking(
+        internalTrack as DashInternalTrack & { info: Extract<DashTrackInfo, { type: 'audio' }> },
+      );
+    }
+    return new DashInputSubtitleTrackBacking(internalTrack);
+  });
+
 export type DashInputTrackBacking =
   | DashInputVideoTrackBacking
   | DashInputAudioTrackBacking
   | DashInputSubtitleTrackBacking;
-
-export { DASH_MIME_TYPE };

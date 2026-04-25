@@ -1,8 +1,9 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import type { EncryptInfo } from '../shared/encrypt-info';
 import { ENCRYPT_METHODS } from '../shared/encrypt-method';
 import type { MediaSegment } from '../shared/media-segment';
 import type { Playlist } from '../shared/playlist';
-import type { MediaStreamInfo } from '../shared/stream-info';
+import type { DashInternalTrack } from './dash-track-backing';
 
 export type Segment = {
   timestamp: number;
@@ -31,12 +32,6 @@ export type DashSegment = Segment & {
   firstSegment: DashSegment | null;
   initSegment: DashSegment | null;
   lastProgramDateTimeSeconds: number | null;
-};
-
-export type DashSegmentSource = {
-  streamInfo: MediaStreamInfo;
-  refreshSegments(streamInfo: MediaStreamInfo): Promise<void>;
-  toSegments(): DashSegment[];
 };
 
 const getSegmentLocation = (segment: MediaSegment): DashSegmentLocation => ({
@@ -117,15 +112,49 @@ export const playlistToDashSegments = (playlist?: Playlist): DashSegment[] => {
 
 export class DashSegmentedInput {
   segments: DashSegment[] = [];
+  currentUpdateSegmentsPromise: Promise<void> | null = null;
+  lastSegmentUpdateTime = -Infinity;
 
-  #source: DashSegmentSource;
+  constructor(readonly internalTrack: DashInternalTrack) {}
 
-  constructor(source: DashSegmentSource) {
-    this.#source = source;
+  runUpdateSegments() {
+    return (this.currentUpdateSegmentsPromise ??= (async () => {
+      try {
+        const remainingWaitTimeMs = this.getRemainingWaitTimeMs();
+        if (remainingWaitTimeMs > 0) {
+          await delay(remainingWaitTimeMs);
+        }
+
+        this.lastSegmentUpdateTime = performance.now();
+        await this.internalTrack.demuxer.refreshTrackSegments(this.internalTrack);
+        this.segments = playlistToDashSegments(this.internalTrack.streamInfo.playlist);
+      } finally {
+        this.currentUpdateSegmentsPromise = null;
+      }
+    })());
   }
 
-  async runUpdateSegments(): Promise<void> {
-    await this.#source.refreshSegments(this.#source.streamInfo);
-    this.segments = this.#source.toSegments();
+  getRemainingWaitTimeMs() {
+    const playlist = this.internalTrack.streamInfo.playlist;
+    if (!playlist?.isLive) {
+      return 0;
+    }
+
+    const elapsed = performance.now() - this.lastSegmentUpdateTime;
+    const result = Math.max(0, playlist.refreshIntervalMs - elapsed);
+    return result <= 50 ? 0 : result;
+  }
+
+  async getLiveRefreshInterval() {
+    if (this.getRemainingWaitTimeMs() === 0) {
+      await this.runUpdateSegments();
+    }
+
+    const playlist = this.internalTrack.streamInfo.playlist;
+    if (!playlist?.isLive) {
+      return null;
+    }
+
+    return playlist.refreshIntervalMs / 1000;
   }
 }

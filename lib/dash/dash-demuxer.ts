@@ -6,31 +6,87 @@ import type {
   MetadataTags,
   PacketType,
 } from 'mediabunny';
+import { DashManifestParser } from './dash-manifest-parser';
 import {
   DASH_MIME_TYPE,
+  getSourceHeaders,
   isDashManifestText,
   isLikelyDashPath,
   loadDashManifest,
 } from './dash-misc';
 import { type DashSegment, DashSegmentedInput } from './dash-segmented-input';
-import { DashSession } from './dash-track-backing';
+import {
+  createDashInternalTracks,
+  createDashTrackBackings,
+  type DashInputTrackBacking,
+  type DashInternalTrack,
+} from './dash-track-backing';
 
 export type { DashSegment } from './dash-segmented-input';
 export { DashSegmentedInput } from './dash-segmented-input';
 
 class DashDemuxer {
-  input: MediabunnyInput;
+  metadataPromise: Promise<void> | null = null;
+  trackBackings: DashInputTrackBacking[] | null = null;
+  internalTracks: DashInternalTrack[] | null = null;
+  segmentedInputs: DashSegmentedInput[] = [];
+  parser: DashManifestParser | null = null;
 
-  #session: DashSession;
+  constructor(readonly input: MediabunnyInput) {}
 
-  constructor(input: MediabunnyInput) {
-    this.input = input;
-    this.#session = new DashSession(input.source);
+  readMetadata() {
+    return (this.metadataPromise ??= (async () => {
+      const { text, url } = await loadDashManifest(this.input.source);
+      const parser = new DashManifestParser({
+        headers: getSourceHeaders(this.input.source),
+        originalUrl: url,
+        url,
+      });
+      const streams = await parser.extractStreams(text.trim());
+      const internalTracks = createDashInternalTracks(this, streams);
+
+      this.parser = parser;
+      this.internalTracks = internalTracks;
+      this.trackBackings = createDashTrackBackings(internalTracks);
+    })());
   }
 
   async getTrackBackings() {
-    const { trackBackings } = await this.#session.load();
-    return trackBackings;
+    await this.readMetadata();
+
+    if (!this.trackBackings) {
+      throw new Error('DASH track metadata did not initialize correctly.');
+    }
+
+    return this.trackBackings;
+  }
+
+  getSegmentedInputForTrack(track: DashInternalTrack) {
+    let segmentedInput = this.segmentedInputs.find((value) => value.internalTrack === track);
+    if (segmentedInput) {
+      return segmentedInput;
+    }
+
+    segmentedInput = new DashSegmentedInput(track);
+    this.segmentedInputs.push(segmentedInput);
+    return segmentedInput;
+  }
+
+  async refreshTrackSegments(track: DashInternalTrack) {
+    await this.readMetadata();
+
+    if (!track.streamInfo.playlist?.isLive || !this.parser) {
+      return;
+    }
+    if (
+      !this.parser.manifestUrl.startsWith('http://') &&
+      !this.parser.manifestUrl.startsWith('https://')
+    ) {
+      return;
+    }
+
+    const streams = this.internalTracks?.map((internalTrack) => internalTrack.streamInfo) ?? [];
+    await this.parser.refreshPlaylist(streams);
   }
 
   async getMimeType() {
@@ -42,7 +98,7 @@ class DashDemuxer {
   }
 
   dispose() {
-    this.#session.dispose();
+    this.segmentedInputs.length = 0;
   }
 }
 
