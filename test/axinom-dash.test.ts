@@ -25,7 +25,9 @@ test('parse axinom clear manifest through the Input API', async () => {
 
   const segments = await targetTrack!.getSegments();
   expect(segments).toHaveLength(184);
-  expect(segments[0]?.initSegment?.location.path).toBe(new URL('1/init.mp4', originalUrl!).toString());
+  expect(segments[0]?.initSegment?.location.path).toBe(
+    new URL('1/init.mp4', originalUrl!).toString(),
+  );
   expect(segments[0]?.location.path).toBe(new URL('1/0001.m4s', originalUrl!).toString());
 });
 
@@ -39,15 +41,15 @@ test('parse axinom multi-drm manifest through the Input API', async () => {
   const firstSubtitleTrack = tracks.find((track) => track.type === 'subtitle');
   expect(await firstSubtitleTrack?.getCodec()).toBe('wvtt');
   const subtitleLanguages = await Promise.all(
-    tracks
-      .filter((track) => track.type === 'subtitle')
-      .map((track) => track.getLanguageCode()),
+    tracks.filter((track) => track.type === 'subtitle').map((track) => track.getLanguageCode()),
   );
   expect(subtitleLanguages).toContain('ru');
 
   const firstVideoTrack = await input.getPrimaryVideoTrack();
   const firstVideoSegment = (await firstVideoTrack!.getSegments())[0];
-  expect(firstVideoSegment?.location.path.startsWith(new URL('.', originalUrl!).toString())).toBe(true);
+  expect(firstVideoSegment?.location.path.startsWith(new URL('.', originalUrl!).toString())).toBe(
+    true,
+  );
   expect(firstVideoSegment?.location.path.endsWith('/0001.m4s')).toBe(true);
   expect(firstVideoSegment?.encryption?.method).toBe('cenc');
 });

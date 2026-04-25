@@ -14,9 +14,6 @@ importers:
       barsic:
         specifier: ^0.2.0
         version: 0.2.0
-      ky:
-        specifier: ^2.0.2
-        version: 2.0.2
       mediabunny:
         specifier: 1.42.0-beta.7
         version: 1.42.0-beta.7
@@ -667,10 +664,6 @@ packages:
     resolution: {integrity: sha512-/sM3dO2FOzXjKQhJuo0Q173wf2KOo8t4I8vHy6lF9poUp7bKT0/NHE8fPX23PwfhnykfqnC2xRxOnVw5XuGIaA==}
     engines: {node: '>=6'}
     hasBin: true
-
-  ky@2.0.2:
-    resolution: {integrity: sha512-/GmXpo9F9W+f8n4Ivr2iH+7h7wL7jLbLKWkMlpflcCRb6kGjBfTlASEXaZ9qUgNTn4VgS0P2pwxxzQ4EM6Ulgg==}
-    engines: {node: '>=22'}
 
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
@@ -1419,8 +1412,6 @@ snapshots:
   import-without-cache@0.3.3: {}
 
   jsesc@3.1.0: {}
-
-  ky@2.0.2: {}
 
   lightningcss-android-arm64@1.32.0:
     optional: true
