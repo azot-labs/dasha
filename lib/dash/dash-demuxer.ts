@@ -42,8 +42,8 @@ class DashDemuxer {
         originalUrl: url,
         url,
       });
-      const streams = await parser.extractStreams(text.trim());
-      const internalTracks = createDashInternalTracks(this, streams);
+      const tracks = await parser.extractTracks(text.trim());
+      const internalTracks = createDashInternalTracks(this, tracks);
 
       this.parser = parser;
       this.internalTracks = internalTracks;
@@ -75,7 +75,7 @@ class DashDemuxer {
   async refreshTrackSegments(track: DashInternalTrack) {
     await this.readMetadata();
 
-    if (!track.streamInfo.playlist?.isLive || !this.parser) {
+    if (!track.track.segmentState.isLive || !this.parser) {
       return;
     }
     if (
@@ -85,8 +85,8 @@ class DashDemuxer {
       return;
     }
 
-    const streams = this.internalTracks?.map((internalTrack) => internalTrack.streamInfo) ?? [];
-    await this.parser.refreshPlaylist(streams);
+    const tracks = this.internalTracks?.map((internalTrack) => internalTrack.track) ?? [];
+    await this.parser.refreshTracks(tracks);
   }
 
   async getMimeType() {

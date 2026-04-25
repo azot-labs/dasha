@@ -5,21 +5,22 @@ import {
   getDolbyDigitalPlusComplexityIndex,
   parseChannels,
 } from '../shared/audio';
-import { EncryptInfo } from '../shared/encrypt-info';
 import { ENCRYPT_METHODS } from '../shared/encrypt-method';
-import type { EncryptMethod } from '../shared/encrypt-method';
-import { MediaPart } from '../shared/media-part';
-import { MediaSegment } from '../shared/media-segment';
-import { Playlist } from '../shared/playlist';
 import { ROLE_TYPE } from '../shared/role-type';
 import { checkIsClosedCaption, checkIsSdh } from '../shared/subtitle';
-import type { MediaStreamInfo } from '../shared/stream-info';
 import { combineUrl, replaceVars } from '../shared/util';
 import { parseDynamicRange } from '../shared/video';
+import {
+  type DashEncryptionData,
+  type DashParsedSegment,
+  type DashParsedTrack,
+  type DashSegmentState,
+  getDashTrackMatchKey,
+} from './dash-model';
 import { DASH_TAGS } from './dash-tags';
 import { parseRange } from './dash-utils';
 import {
-  createDashStreamInfo,
+  createDashTrackDescriptor,
   extendDashBaseUrl,
   filterDashLanguage,
   getDashFrameRate,
@@ -63,28 +64,33 @@ const processDashContent = (mpdContent: string) => {
   return replaceFirst(mpdContent, '<MPD ', `<MPD ${missingNamespaceDefinitions.join(' ')} `);
 };
 
-const getPrimaryMediaPart = (playlist: Playlist) => {
-  const mediaPart = playlist.mediaParts[0];
-  if (!mediaPart) {
-    throw new Error('DASH playlist must have a primary media part.');
-  }
-  return mediaPart;
+const createSegmentState = (isLive: boolean, timeShiftBufferDepth: string): DashSegmentState => ({
+  isLive,
+  refreshIntervalMs: Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2,
+  initSegment: null,
+  mediaSegments: [],
+});
+
+const addWholeResourceSegment = (segmentState: DashSegmentState, url: string, duration: number) => {
+  segmentState.mediaSegments.push({
+    sequenceNumber: 0,
+    duration,
+    url,
+    encryption: null,
+  });
 };
 
-const getMediaSegments = (playlist: Playlist) => getPrimaryMediaPart(playlist).mediaSegments;
-
-const addWholeResourceSegment = (playlist: Playlist, url: string, duration: number) => {
-  const mediaSegment = new MediaSegment();
-  mediaSegment.index = 0;
-  mediaSegment.url = url;
-  mediaSegment.duration = duration;
-  getMediaSegments(playlist).push(mediaSegment);
-};
-
-const createRangedSegment = (url: string, index: number, range?: string | null) => {
-  const segment = new MediaSegment();
-  segment.index = index;
-  segment.url = url;
+const createRangedSegment = (
+  url: string,
+  sequenceNumber: number,
+  range?: string | null,
+): DashParsedSegment => {
+  const segment: DashParsedSegment = {
+    sequenceNumber,
+    duration: 0,
+    url,
+    encryption: null,
+  };
 
   if (range) {
     const [start, expect] = parseRange(range);
@@ -95,41 +101,62 @@ const createRangedSegment = (url: string, index: number, range?: string | null) 
   return segment;
 };
 
-const createPlaylist = (isLive: boolean, timeShiftBufferDepth: string) => {
-  const playlist = new Playlist();
-  playlist.isLive = isLive;
-  playlist.mediaParts.push(new MediaPart());
-  playlist.refreshIntervalMs =
-    Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2;
-  return playlist;
-};
-
 const getRoleType = (roleValue: string) => {
   const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
   const roleTypeKey = roleValue.split('-').map(capitalize).join('');
   return ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
 };
 
-const applyTrackMetadata = (params: {
+const createTrack = (params: {
   adaptationSet: Element;
   bitrate: number;
+  contentType: string | null;
   frameRate: number | undefined;
+  isLive: boolean;
+  manifestUrl: string;
+  mimeType: string | null;
+  originalUrl: string;
   period: Element;
-  playlist: Playlist;
   publishTime: string | null;
   representation: Element;
-  streamInfo: MediaStreamInfo;
+  timeShiftBufferDepth: string;
 }) => {
   const {
     adaptationSet,
-    bitrate,
+    contentType,
     frameRate,
+    isLive,
+    manifestUrl,
+    mimeType,
+    originalUrl,
     period,
-    playlist,
     publishTime,
     representation,
-    streamInfo,
+    timeShiftBufferDepth,
   } = params;
+  const bitrate = params.bitrate;
+  const descriptor = createDashTrackDescriptor({
+    codecs: representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs'),
+    contentType,
+    mimeType,
+  });
+  const segmentState = createSegmentState(isLive, timeShiftBufferDepth);
+  const track = {
+    type: descriptor.type,
+    codec: descriptor.codec,
+    codecString: descriptor.codecString,
+    manifestUrl,
+    originalUrl,
+    peakBitrate: bitrate,
+    averageBitrate: bitrate,
+    name: null,
+    default: false,
+    groupId: representation.getAttribute('id'),
+    periodId: period.getAttribute('id'),
+    extension: null,
+    segmentState,
+  } as DashParsedTrack;
+
   const roles = getDashTagAttrs('Role', representation, adaptationSet);
   const supplementalProps = getDashTagAttrs('SupplementalProperty', representation, adaptationSet);
   const essentialProps = getDashTagAttrs('EssentialProperty', representation, adaptationSet);
@@ -139,83 +166,78 @@ const applyTrackMetadata = (params: {
     adaptationSet,
     representation,
   );
-  const codecs = representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs');
+  const channelsString = audioChannelConfigs[0]?.value;
   const width = representation.getAttribute('width');
   const height = representation.getAttribute('height');
-  const channelsString = audioChannelConfigs[0]?.value;
 
-  streamInfo.languageCode = filterDashLanguage(
+  track.languageCode = filterDashLanguage(
     representation.getAttribute('lang') || adaptationSet.getAttribute('lang'),
   );
-  streamInfo.bitrate = bitrate;
-  streamInfo.playlist = playlist;
-  streamInfo.periodId = period.getAttribute('id');
-  streamInfo.groupId = representation.getAttribute('id');
-  streamInfo.codecs = codecs;
 
   const volumeAdjust = representation.getAttribute('volumeAdjust');
   if (volumeAdjust) {
-    streamInfo.groupId = `${streamInfo.groupId}-${volumeAdjust}`;
+    track.groupId = `${track.groupId}-${volumeAdjust}`;
   }
 
-  const mimeType =
+  const actualMimeType =
     representation.getAttribute('mimeType') || adaptationSet.getAttribute('mimeType');
-  if (mimeType) {
-    const mimeTypeSplit = mimeType.split('/');
-    streamInfo.extension = mimeTypeSplit.length === 2 ? mimeTypeSplit[1] : null;
+  if (actualMimeType) {
+    const mimeTypeSplit = actualMimeType.split('/');
+    track.extension = mimeTypeSplit.length === 2 ? mimeTypeSplit[1] : null;
   }
 
-  if (streamInfo.type === 'video') {
-    streamInfo.width = Number(width);
-    streamInfo.height = Number(height);
-    streamInfo.frameRate = frameRate || getDashFrameRate(representation);
-    if (codecs && supplementalProps && essentialProps) {
-      streamInfo.dynamicRange = parseDynamicRange(codecs, supplementalProps, essentialProps);
+  if (track.type === 'video') {
+    track.width = Number(width);
+    track.height = Number(height);
+    track.frameRate = frameRate || getDashFrameRate(representation);
+    if (track.codecString && supplementalProps && essentialProps) {
+      track.dynamicRange = parseDynamicRange(track.codecString, supplementalProps, essentialProps);
     }
-  } else if (streamInfo.type === 'audio') {
+  } else if (track.type === 'audio') {
     if (accessibilities) {
-      streamInfo.descriptive = checkIsDescriptive(accessibilities);
+      track.descriptive = checkIsDescriptive(accessibilities);
     }
     if (supplementalProps) {
-      streamInfo.joc = getDolbyDigitalPlusComplexityIndex(supplementalProps);
+      track.joc = getDolbyDigitalPlusComplexityIndex(supplementalProps);
     }
     if (channelsString) {
-      streamInfo.numberOfChannels = parseChannels(channelsString);
-      streamInfo.channels = channelsString;
+      track.numberOfChannels = parseChannels(channelsString);
     }
-  } else if (streamInfo.type === 'subtitle') {
+  } else {
     if (roles) {
-      streamInfo.cc = checkIsClosedCaption(roles);
+      track.cc = checkIsClosedCaption(roles);
     }
     if (accessibilities) {
-      streamInfo.sdh = checkIsSdh(accessibilities);
+      track.sdh = checkIsSdh(accessibilities);
     }
   }
 
   const role = roles[0];
   if (role?.value) {
-    streamInfo.role = getRoleType(role.value);
+    track.role = getRoleType(role.value);
   }
 
   if (publishTime) {
-    streamInfo.publishTime = new Date(publishTime);
+    track.publishTime = new Date(publishTime);
   }
+
+  return track;
 };
 
-const normalizeStreamExtension = (streamInfo: MediaStreamInfo, playlist: Playlist) => {
-  if (streamInfo.type === 'subtitle' && streamInfo.extension === 'mp4') {
-    streamInfo.extension = 'm4s';
+const normalizeTrackExtension = (track: DashParsedTrack) => {
+  if (track.type === 'subtitle' && track.extension === 'mp4') {
+    track.extension = 'm4s';
   }
 
   if (
-    streamInfo.type !== 'subtitle' &&
-    (streamInfo.extension == null || getMediaSegments(playlist).length > 1)
+    track.type !== 'subtitle' &&
+    (track.extension == null || track.segmentState.mediaSegments.length > 1)
   ) {
-    streamInfo.extension = 'm4s';
+    track.extension = 'm4s';
   }
 };
 
-const applySegmentBase = (representation: Element, playlist: Playlist, segBaseUrl: string) => {
+const applySegmentBase = (representation: Element, track: DashParsedTrack, segBaseUrl: string) => {
   const segmentBaseElement = representation.getElementsByTagName('SegmentBase')[0];
   if (!segmentBaseElement) return;
 
@@ -225,15 +247,14 @@ const applySegmentBase = (representation: Element, playlist: Playlist, segBaseUr
   const sourceUrl = initialization.getAttribute('sourceURL');
   if (!sourceUrl) return;
 
-  const initSegment = createRangedSegment(
+  track.segmentState.initSegment = createRangedSegment(
     combineUrl(segBaseUrl, sourceUrl),
     -1,
     initialization.getAttribute('range'),
   );
-  playlist.mediaInit = initSegment;
 };
 
-const applySegmentList = (representation: Element, playlist: Playlist, segBaseUrl: string) => {
+const applySegmentList = (representation: Element, track: DashParsedTrack, segBaseUrl: string) => {
   const segmentList = representation.getElementsByTagName('SegmentList')[0];
   if (!segmentList) return;
 
@@ -241,7 +262,7 @@ const applySegmentList = (representation: Element, playlist: Playlist, segBaseUr
   if (initialization) {
     const sourceUrl = initialization.getAttribute('sourceURL');
     if (sourceUrl) {
-      playlist.mediaInit = createRangedSegment(
+      track.segmentState.initSegment = createRangedSegment(
         combineUrl(segBaseUrl, sourceUrl),
         -1,
         initialization.getAttribute('range'),
@@ -264,110 +285,50 @@ const applySegmentList = (representation: Element, playlist: Playlist, segBaseUr
       segmentUrl.getAttribute('mediaRange'),
     );
     segment.duration = duration / timescale;
-    getMediaSegments(playlist).push(segment);
+    track.segmentState.mediaSegments.push(segment);
   }
 };
 
-const applySegmentTemplate = (params: {
-  adaptationSet: Element;
-  availabilityStartTime: string | null;
-  bitrate: number;
-  groupId: string | null;
-  isLive: boolean;
-  periodDurationSeconds: number;
-  playlist: Playlist;
-  representation: Element;
+const appendTemplatedSegment = (params: {
+  currentTime: number;
+  duration: number;
+  hasTimePlaceholder: boolean;
+  index: number;
+  mediaTemplate: string;
+  segmentState: DashSegmentState;
+  segmentNumber: number;
   segBaseUrl: string;
-  timeShiftBufferDepth: string;
+  timescale: number;
+  variables: Record<string, string>;
 }) => {
   const {
-    adaptationSet,
-    availabilityStartTime,
-    bitrate,
-    groupId,
-    isLive,
-    periodDurationSeconds,
-    playlist,
-    representation,
-    segBaseUrl,
-    timeShiftBufferDepth,
-  } = params;
-  const adaptationSetTemplates = adaptationSet.getElementsByTagName('SegmentTemplate');
-  const representationTemplates = representation.getElementsByTagName('SegmentTemplate');
-  if (!adaptationSetTemplates.length && !representationTemplates.length) return;
-
-  const segmentTemplate = representationTemplates[0] || adaptationSetTemplates[0];
-  const fallbackTemplate = adaptationSetTemplates[0] || representationTemplates[0];
-  const variables: Record<string, string> = {
-    [DASH_TAGS.TemplateBandwidth]: String(bitrate),
-    [DASH_TAGS.TemplateRepresentationID]: groupId ?? '',
-  };
-
-  const presentationTimeOffset =
-    segmentTemplate.getAttribute('presentationTimeOffset') ||
-    fallbackTemplate.getAttribute('presentationTimeOffset') ||
-    '0';
-  const timescaleString =
-    segmentTemplate.getAttribute('timescale') || fallbackTemplate.getAttribute('timescale') || '1';
-  const durationString =
-    segmentTemplate.getAttribute('duration') || fallbackTemplate.getAttribute('duration');
-  const startNumberString =
-    segmentTemplate.getAttribute('startNumber') ||
-    fallbackTemplate.getAttribute('startNumber') ||
-    '1';
-  const initialization =
-    segmentTemplate.getAttribute('initialization') ||
-    fallbackTemplate.getAttribute('initialization');
-
-  if (initialization) {
-    const initPath = replaceVars(initialization, variables);
-    const initSegment = new MediaSegment();
-    initSegment.index = -1;
-    initSegment.url = combineUrl(segBaseUrl, initPath);
-    playlist.mediaInit = initSegment;
-  }
-
-  const mediaTemplate =
-    segmentTemplate.getAttribute('media') || fallbackTemplate.getAttribute('media');
-  if (!mediaTemplate) return;
-
-  const segmentTimeline = segmentTemplate.getElementsByTagName('SegmentTimeline')[0];
-  if (segmentTimeline) {
-    applySegmentTimeline({
-      mediaTemplate,
-      periodDurationSeconds,
-      playlist,
-      segBaseUrl,
-      startNumberString,
-      timeline: segmentTimeline,
-      timescaleString,
-      variables,
-    });
-    return;
-  }
-
-  if (!durationString) return;
-
-  applyFixedDurationTemplate({
-    availabilityStartTime,
-    durationString,
-    isLive,
+    currentTime,
+    duration,
+    hasTimePlaceholder,
+    index,
     mediaTemplate,
-    periodDurationSeconds,
-    playlist,
-    presentationTimeOffset,
+    segmentState,
+    segmentNumber,
     segBaseUrl,
-    startNumberString,
-    timeShiftBufferDepth,
-    timescaleString,
+    timescale,
     variables,
+  } = params;
+  variables[DASH_TAGS.TemplateTime] = String(currentTime);
+  variables[DASH_TAGS.TemplateNumber] = String(segmentNumber);
+
+  segmentState.mediaSegments.push({
+    sequenceNumber: index,
+    duration: duration / timescale,
+    url: combineUrl(segBaseUrl, replaceVars(mediaTemplate, variables)),
+    encryption: null,
+    ...(hasTimePlaceholder ? { nameFromVar: String(currentTime) } : {}),
   });
 };
 
 const applySegmentTimeline = (params: {
   mediaTemplate: string;
   periodDurationSeconds: number;
-  playlist: Playlist;
+  segmentState: DashSegmentState;
   segBaseUrl: string;
   startNumberString: string;
   timeline: Element;
@@ -377,7 +338,7 @@ const applySegmentTimeline = (params: {
   const {
     mediaTemplate,
     periodDurationSeconds,
-    playlist,
+    segmentState,
     segBaseUrl,
     startNumberString,
     timeline,
@@ -404,7 +365,7 @@ const applySegmentTimeline = (params: {
       hasTimePlaceholder,
       index: segmentIndex++,
       mediaTemplate,
-      playlist,
+      segmentState,
       segmentNumber: segmentNumber++,
       segBaseUrl,
       timescale,
@@ -423,7 +384,7 @@ const applySegmentTimeline = (params: {
         hasTimePlaceholder,
         index: segmentIndex++,
         mediaTemplate,
-        playlist,
+        segmentState,
         segmentNumber: segmentNumber++,
         segBaseUrl,
         timescale,
@@ -435,50 +396,13 @@ const applySegmentTimeline = (params: {
   }
 };
 
-const appendTemplatedSegment = (params: {
-  currentTime: number;
-  duration: number;
-  hasTimePlaceholder: boolean;
-  index: number;
-  mediaTemplate: string;
-  playlist: Playlist;
-  segmentNumber: number;
-  segBaseUrl: string;
-  timescale: number;
-  variables: Record<string, string>;
-}) => {
-  const {
-    currentTime,
-    duration,
-    hasTimePlaceholder,
-    index,
-    mediaTemplate,
-    playlist,
-    segmentNumber,
-    segBaseUrl,
-    timescale,
-    variables,
-  } = params;
-  variables[DASH_TAGS.TemplateTime] = String(currentTime);
-  variables[DASH_TAGS.TemplateNumber] = String(segmentNumber);
-
-  const mediaSegment = new MediaSegment();
-  mediaSegment.index = index;
-  mediaSegment.url = combineUrl(segBaseUrl, replaceVars(mediaTemplate, variables));
-  mediaSegment.duration = duration / timescale;
-  if (hasTimePlaceholder) {
-    mediaSegment.nameFromVar = String(currentTime);
-  }
-  getMediaSegments(playlist).push(mediaSegment);
-};
-
 const applyFixedDurationTemplate = (params: {
   availabilityStartTime: string | null;
   durationString: string;
   isLive: boolean;
   mediaTemplate: string;
   periodDurationSeconds: number;
-  playlist: Playlist;
+  segmentState: DashSegmentState;
   presentationTimeOffset: string;
   segBaseUrl: string;
   startNumberString: string;
@@ -492,7 +416,7 @@ const applyFixedDurationTemplate = (params: {
     isLive,
     mediaTemplate,
     periodDurationSeconds,
-    playlist,
+    segmentState,
     presentationTimeOffset,
     segBaseUrl,
     startNumberString,
@@ -524,30 +448,136 @@ const applyFixedDurationTemplate = (params: {
   for (let number = startNumber, segmentIndex = 0; number < startNumber + totalNumber; number++) {
     variables[DASH_TAGS.TemplateNumber] = String(number);
 
-    const mediaSegment = new MediaSegment();
-    mediaSegment.index = isLive ? number : segmentIndex++;
-    mediaSegment.url = combineUrl(segBaseUrl, replaceVars(mediaTemplate, variables));
-    mediaSegment.duration = duration / timescale;
-    if (hasNumberPlaceholder) {
-      mediaSegment.nameFromVar = String(number);
-    }
-    getMediaSegments(playlist).push(mediaSegment);
+    segmentState.mediaSegments.push({
+      sequenceNumber: isLive ? number : segmentIndex++,
+      duration: duration / timescale,
+      url: combineUrl(segBaseUrl, replaceVars(mediaTemplate, variables)),
+      encryption: null,
+      ...(hasNumberPlaceholder ? { nameFromVar: String(number) } : {}),
+    });
   }
 };
 
+const applySegmentTemplate = (params: {
+  adaptationSet: Element;
+  availabilityStartTime: string | null;
+  bitrate: number;
+  groupId: string | null;
+  isLive: boolean;
+  periodDurationSeconds: number;
+  representation: Element;
+  segBaseUrl: string;
+  segmentState: DashSegmentState;
+  timeShiftBufferDepth: string;
+}) => {
+  const {
+    adaptationSet,
+    availabilityStartTime,
+    bitrate,
+    groupId,
+    isLive,
+    periodDurationSeconds,
+    representation,
+    segBaseUrl,
+    segmentState,
+    timeShiftBufferDepth,
+  } = params;
+  const adaptationSetTemplates = adaptationSet.getElementsByTagName('SegmentTemplate');
+  const representationTemplates = representation.getElementsByTagName('SegmentTemplate');
+  if (!adaptationSetTemplates.length && !representationTemplates.length) return;
+
+  const segmentTemplate = representationTemplates[0] || adaptationSetTemplates[0];
+  const fallbackTemplate = adaptationSetTemplates[0] || representationTemplates[0];
+  const variables: Record<string, string> = {
+    [DASH_TAGS.TemplateBandwidth]: String(bitrate),
+    [DASH_TAGS.TemplateRepresentationID]: groupId ?? '',
+  };
+
+  const presentationTimeOffset =
+    segmentTemplate.getAttribute('presentationTimeOffset') ||
+    fallbackTemplate.getAttribute('presentationTimeOffset') ||
+    '0';
+  const timescaleString =
+    segmentTemplate.getAttribute('timescale') || fallbackTemplate.getAttribute('timescale') || '1';
+  const durationString =
+    segmentTemplate.getAttribute('duration') || fallbackTemplate.getAttribute('duration');
+  const startNumberString =
+    segmentTemplate.getAttribute('startNumber') ||
+    fallbackTemplate.getAttribute('startNumber') ||
+    '1';
+  const initialization =
+    segmentTemplate.getAttribute('initialization') ||
+    fallbackTemplate.getAttribute('initialization');
+
+  if (initialization) {
+    segmentState.initSegment = {
+      sequenceNumber: -1,
+      duration: 0,
+      url: combineUrl(segBaseUrl, replaceVars(initialization, variables)),
+      encryption: null,
+    };
+  }
+
+  const mediaTemplate =
+    segmentTemplate.getAttribute('media') || fallbackTemplate.getAttribute('media');
+  if (!mediaTemplate) return;
+
+  const segmentTimeline = segmentTemplate.getElementsByTagName('SegmentTimeline')[0];
+  if (segmentTimeline) {
+    applySegmentTimeline({
+      mediaTemplate,
+      periodDurationSeconds,
+      segmentState,
+      segBaseUrl,
+      startNumberString,
+      timeline: segmentTimeline,
+      timescaleString,
+      variables,
+    });
+    return;
+  }
+
+  if (!durationString) return;
+
+  applyFixedDurationTemplate({
+    availabilityStartTime,
+    durationString,
+    isLive,
+    mediaTemplate,
+    periodDurationSeconds,
+    segmentState,
+    presentationTimeOffset,
+    segBaseUrl,
+    startNumberString,
+    timeShiftBufferDepth,
+    timescaleString,
+    variables,
+  });
+};
+
 const ensureFallbackMediaSegment = (
-  playlist: Playlist,
+  track: DashParsedTrack,
   segBaseUrl: string,
   periodDurationSeconds: number,
 ) => {
-  if (getMediaSegments(playlist).length > 0) return;
-  addWholeResourceSegment(playlist, segBaseUrl, periodDurationSeconds);
+  if (track.segmentState.mediaSegments.length > 0) return;
+  addWholeResourceSegment(track.segmentState, segBaseUrl, periodDurationSeconds);
 };
+
+const cloneEncryption = (encryption: DashEncryptionData | null): DashEncryptionData | null =>
+  encryption
+    ? {
+        method: encryption.method,
+        key: encryption.key,
+        iv: encryption.iv,
+        drm: { ...encryption.drm },
+      }
+    : null;
 
 const applyContentProtection = (
   adaptationSet: Element,
   representation: Element,
-  playlist: Playlist,
+  track: DashParsedTrack,
 ) => {
   const adaptationSetProtections = adaptationSet.getElementsByTagName('ContentProtection');
   const representationProtections = representation.getElementsByTagName('ContentProtection');
@@ -556,8 +586,10 @@ const applyContentProtection = (
     : adaptationSetProtections;
   if (!contentProtections.length) return;
 
-  const encryptInfo = new EncryptInfo();
-  encryptInfo.method = ENCRYPT_METHODS.CENC as EncryptMethod;
+  const encryption: DashEncryptionData = {
+    method: ENCRYPT_METHODS.CENC,
+    drm: {},
+  };
 
   for (const contentProtection of contentProtections) {
     const schemeIdUri = contentProtection.getAttribute('schemeIdUri');
@@ -567,39 +599,35 @@ const applyContentProtection = (
     const drmData = { keyId: defaultKID, pssh };
 
     if (schemeIdUri?.includes(WIDEVINE_SYSTEM_ID)) {
-      encryptInfo.drm.widevine = drmData;
+      encryption.drm.widevine = drmData;
     } else if (schemeIdUri?.includes(PLAYREADY_SYSTEM_ID)) {
-      encryptInfo.drm.playready = drmData;
+      encryption.drm.playready = drmData;
     }
   }
 
-  if (playlist.mediaInit) {
-    playlist.mediaInit.encryptInfo = encryptInfo;
+  if (track.segmentState.initSegment) {
+    track.segmentState.initSegment.encryption = cloneEncryption(encryption);
   }
 
-  for (const segment of getMediaSegments(playlist)) {
-    if (!segment.encryptInfo || segment.encryptInfo.method === 'unknown') {
-      segment.encryptInfo = encryptInfo;
+  for (const segment of track.segmentState.mediaSegments) {
+    if (!segment.encryption) {
+      segment.encryption = cloneEncryption(encryption);
     }
   }
 };
 
-const mergePeriodStream = (
-  streams: MediaStreamInfo[],
-  streamInfo: MediaStreamInfo,
-  isLive: boolean,
-) => {
-  const existingStreamIndex = streams.findIndex(
+const mergePeriodTrack = (tracks: DashParsedTrack[], track: DashParsedTrack, isLive: boolean) => {
+  const existingTrackIndex = tracks.findIndex(
     (item) =>
-      item.type === streamInfo.type &&
-      item.periodId !== streamInfo.periodId &&
-      item.groupId === streamInfo.groupId &&
-      (item.type === 'video' && streamInfo.type === 'video'
-        ? item.width === streamInfo.width && item.height === streamInfo.height
+      item.type === track.type &&
+      item.periodId !== track.periodId &&
+      item.groupId === track.groupId &&
+      (item.type === 'video' && track.type === 'video'
+        ? item.width === track.width && item.height === track.height
         : true),
   );
-  if (existingStreamIndex < 0) {
-    streams.push(streamInfo);
+  if (existingTrackIndex < 0) {
+    tracks.push(track);
     return;
   }
 
@@ -607,49 +635,50 @@ const mergePeriodStream = (
     return;
   }
 
-  const existingPlaylist = streams[existingStreamIndex]?.playlist;
-  const incomingPlaylist = streamInfo.playlist;
-  const lastPart = existingPlaylist?.mediaParts.at(-1);
-  const lastSegment = lastPart?.mediaSegments.at(-1);
-  const incomingSegments = incomingPlaylist ? getMediaSegments(incomingPlaylist) : [];
+  const existingTrack = tracks[existingTrackIndex];
+  if (!existingTrack) {
+    return;
+  }
+
+  const lastSegment = existingTrack.segmentState.mediaSegments.at(-1);
+  const incomingSegments = track.segmentState.mediaSegments;
   const incomingLastSegment = incomingSegments.at(-1);
-  if (!existingPlaylist || !lastPart || !lastSegment || !incomingLastSegment) {
+  if (!lastSegment || !incomingLastSegment) {
     return;
   }
 
   if (lastSegment.url !== incomingLastSegment.url) {
-    const startIndex = lastSegment.index + 1;
+    const startIndex = (lastSegment.sequenceNumber ?? 0) + 1;
     for (const segment of incomingSegments) {
-      segment.index += startIndex;
+      if (segment.sequenceNumber !== null) {
+        segment.sequenceNumber += startIndex;
+      }
     }
-
-    const mediaPart = new MediaPart();
-    mediaPart.mediaSegments = incomingSegments;
-    existingPlaylist.mediaParts.push(mediaPart);
+    existingTrack.segmentState.mediaSegments.push(...incomingSegments);
     return;
   }
 
   lastSegment.duration += incomingSegments.reduce((sum, segment) => sum + segment.duration, 0);
 };
 
-const linkDefaultGroups = (streams: MediaStreamInfo[]) => {
-  const audioList = streams.filter((stream) => stream.type === 'audio');
-  const subtitleList = streams.filter((stream) => stream.type === 'subtitle');
-  const videoList = streams.filter((stream) => stream.type === 'video');
+const linkDefaultGroups = (tracks: DashParsedTrack[]) => {
+  const audioList = tracks.filter((track) => track.type === 'audio');
+  const subtitleList = tracks.filter((track) => track.type === 'subtitle');
+  const videoList = tracks.filter((track) => track.type === 'video');
 
   for (const video of videoList) {
     const audioGroupId = audioList
-      .toSorted((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
+      .toSorted((a, b) => (b.peakBitrate || 0) - (a.peakBitrate || 0))
       .at(0)?.groupId;
     const subtitleGroupId = subtitleList
-      .toSorted((a, b) => (b.bitrate || 0) - (a.bitrate || 0))
+      .toSorted((a, b) => (b.peakBitrate || 0) - (a.peakBitrate || 0))
       .at(0)?.groupId;
 
     if (audioGroupId) {
-      video.audioId = audioGroupId;
+      video.audioGroupId = audioGroupId;
     }
     if (subtitleGroupId) {
-      video.subtitleId = subtitleGroupId;
+      video.subtitleGroupId = subtitleGroupId;
     }
   }
 };
@@ -669,8 +698,8 @@ export class DashManifestParser {
     return this.#context.url;
   }
 
-  async extractStreams(rawText: string): Promise<MediaStreamInfo[]> {
-    const streamInfos: MediaStreamInfo[] = [];
+  async extractTracks(rawText: string): Promise<DashParsedTrack[]> {
+    const tracks: DashParsedTrack[] = [];
 
     this.#mpdContent = processDashContent(rawText);
 
@@ -708,54 +737,50 @@ export class DashManifestParser {
           contentType ||= representation.getAttribute('contentType');
           mimeType ||= representation.getAttribute('mimeType');
           const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
-          const codecs =
-            representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs');
-          const streamInfo = createDashStreamInfo({ codecs, contentType, mimeType });
-          const playlist = createPlaylist(isLive, timeShiftBufferDepth);
-
-          streamInfo.url = this.#mpdUrl;
-          streamInfo.originalUrl = this.#context.originalUrl;
-
-          applyTrackMetadata({
+          const track = createTrack({
             adaptationSet,
             bitrate,
+            contentType,
             frameRate: adaptationSetFrameRate,
+            isLive,
+            manifestUrl: this.#mpdUrl,
+            mimeType,
+            originalUrl: this.#context.originalUrl,
             period,
-            playlist,
             publishTime,
             representation,
-            streamInfo,
+            timeShiftBufferDepth,
           });
 
-          applySegmentBase(representation, playlist, segBaseUrl);
-          applySegmentList(representation, playlist, segBaseUrl);
+          applySegmentBase(representation, track, segBaseUrl);
+          applySegmentList(representation, track, segBaseUrl);
           applySegmentTemplate({
             adaptationSet,
             availabilityStartTime,
             bitrate,
-            groupId: streamInfo.groupId,
+            groupId: track.groupId,
             isLive,
             periodDurationSeconds,
-            playlist,
             representation,
             segBaseUrl,
+            segmentState: track.segmentState,
             timeShiftBufferDepth,
           });
-          ensureFallbackMediaSegment(playlist, segBaseUrl, periodDurationSeconds);
-          normalizeStreamExtension(streamInfo, playlist);
-          applyContentProtection(adaptationSet, representation, playlist);
+          ensureFallbackMediaSegment(track, segBaseUrl, periodDurationSeconds);
+          normalizeTrackExtension(track);
+          applyContentProtection(adaptationSet, representation, track);
 
-          mergePeriodStream(streamInfos, streamInfo, isLive);
+          mergePeriodTrack(tracks, track, isLive);
         }
       }
     }
 
-    linkDefaultGroups(streamInfos);
-    return streamInfos;
+    linkDefaultGroups(tracks);
+    return tracks;
   }
 
-  async refreshPlaylist(streamInfos: MediaStreamInfo[]): Promise<void> {
-    if (!streamInfos.length) return;
+  async refreshTracks(tracks: DashParsedTrack[]): Promise<void> {
+    if (!tracks.length) return;
 
     const response = await this.#fetchManifest(this.#context.url).catch(() =>
       this.#fetchManifest(this.#context.originalUrl),
@@ -765,21 +790,29 @@ export class DashManifestParser {
     this.#context.url = response.url;
     this.#resetManifestUrls();
 
-    const newStreams = await this.extractStreams(rawText);
-    for (const streamInfo of streamInfos) {
-      let matchingStreams = newStreams.filter(
-        (candidate) => candidate.toShortString() === streamInfo.toShortString(),
+    const newTracks = await this.extractTracks(rawText);
+    for (const track of tracks) {
+      let matchingTracks = newTracks.filter(
+        (candidate) => getDashTrackMatchKey(candidate) === getDashTrackMatchKey(track),
       );
-      if (!matchingStreams.length) {
-        matchingStreams = newStreams.filter(
-          (candidate) => candidate.playlist?.mediaInit?.url === streamInfo.playlist?.mediaInit?.url,
+      if (!matchingTracks.length) {
+        matchingTracks = newTracks.filter(
+          (candidate) =>
+            candidate.segmentState.initSegment?.url === track.segmentState.initSegment?.url,
         );
       }
 
-      const nextPlaylist = matchingStreams[0]?.playlist;
-      if (streamInfo.playlist && nextPlaylist) {
-        streamInfo.playlist.mediaParts = nextPlaylist.mediaParts;
+      const nextTrack = matchingTracks[0];
+      if (!nextTrack) {
+        continue;
       }
+
+      track.segmentState = nextTrack.segmentState;
+      track.publishTime = nextTrack.publishTime;
+      track.manifestUrl = nextTrack.manifestUrl;
+      track.originalUrl = nextTrack.originalUrl;
+      track.audioGroupId = nextTrack.audioGroupId;
+      track.subtitleGroupId = nextTrack.subtitleGroupId;
     }
   }
 

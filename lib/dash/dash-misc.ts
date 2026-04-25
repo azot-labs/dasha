@@ -2,16 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { Element, LiveNodeList } from '@xmldom/xmldom';
 import type { Source } from 'mediabunny';
 import { combineUrl } from '../shared/util';
-import {
-  AudioStreamInfo,
-  MediaStreamInfo,
-  SubtitleStreamInfo,
-  VideoStreamInfo,
-} from '../shared/stream-info';
+import type { MediaCodec } from '../shared/codec';
 import { tryParseVideoCodec } from '../shared/video';
 import { tryParseSubtitleCodec } from '../shared/subtitle';
 import { tryParseAudioCodec } from '../shared/audio';
 import { pipe } from '../shared/pipe';
+import type { DashTrackType } from './dash-model';
 
 export const DASH_MIME_TYPE = 'application/dash+xml';
 
@@ -96,11 +92,11 @@ export const isLikelyDashPath = (source: Source) => {
 
 export const isDashManifestText = (text: string) => /<MPD(?:\s|>)/i.test(text);
 
-export const createDashStreamInfo = (params: {
+export const createDashTrackDescriptor = (params: {
   codecs: string | null;
   contentType: string | null;
   mimeType: string | null;
-}): MediaStreamInfo => {
+}): { type: DashTrackType; codec?: MediaCodec; codecString: string | null } => {
   const shouldUseCodecsFromMime =
     params.contentType === 'text' && !params.mimeType?.includes('mp4');
   const codecs = shouldUseCodecsFromMime ? params.mimeType?.split('/')[1] : params.codecs;
@@ -108,16 +104,18 @@ export const createDashStreamInfo = (params: {
 
   if (params.codecs) {
     const videoCodec = tryParseVideoCodec(params.codecs);
-    if (videoCodec) return new VideoStreamInfo({ codec: videoCodec });
+    if (videoCodec) return { type: 'video', codec: videoCodec, codecString: params.codecs };
     const audioCodec = tryParseAudioCodec(params.codecs);
-    if (audioCodec) return new AudioStreamInfo({ codec: audioCodec });
+    if (audioCodec) return { type: 'audio', codec: audioCodec, codecString: params.codecs };
     const subtitleCodec = tryParseSubtitleCodec(params.codecs);
-    if (subtitleCodec) return new SubtitleStreamInfo({ codec: subtitleCodec });
+    if (subtitleCodec)
+      return { type: 'subtitle', codec: subtitleCodec, codecString: params.codecs };
   } else {
     const type = params.contentType || params.mimeType?.split('/')[0];
-    if (type === 'video') return new VideoStreamInfo();
-    if (type === 'audio') return new AudioStreamInfo();
-    if (type === 'text') return new SubtitleStreamInfo();
+    if (type === 'video') return { type: 'video', codecString: null };
+    if (type === 'audio') return { type: 'audio', codecString: null };
+    if (type === 'text')
+      return { type: 'subtitle', codecString: params.mimeType?.split('/')[1] ?? null };
   }
 
   throw new Error('Unable to determine the type of a track, cannot continue...');

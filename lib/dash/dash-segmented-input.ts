@@ -1,8 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { EncryptInfo } from '../shared/encrypt-info';
-import { ENCRYPT_METHODS } from '../shared/encrypt-method';
-import type { MediaSegment } from '../shared/media-segment';
-import type { Playlist } from '../shared/playlist';
+import type { DashEncryptionData, DashParsedSegment } from './dash-model';
 import type { DashInternalTrack } from './dash-track-backing';
 
 export type Segment = {
@@ -18,12 +15,7 @@ export type DashSegmentLocation = {
   length: number | null;
 };
 
-export type DashEncryptionInfo = {
-  method: string;
-  key: Uint8Array | undefined;
-  iv: Uint8Array | undefined;
-  drm: EncryptInfo['drm'];
-};
+export type DashEncryptionInfo = DashEncryptionData;
 
 export type DashSegment = Segment & {
   sequenceNumber: number | null;
@@ -34,48 +26,29 @@ export type DashSegment = Segment & {
   lastProgramDateTimeSeconds: number | null;
 };
 
-const getSegmentLocation = (segment: MediaSegment): DashSegmentLocation => ({
+const getSegmentLocation = (segment: DashParsedSegment): DashSegmentLocation => ({
   path: segment.url,
   offset: segment.startRange ?? 0,
   length: segment.expectLength ?? null,
 });
 
-const getSegmentEncryption = (encryptInfo: EncryptInfo): DashEncryptionInfo | null => {
-  if (
-    encryptInfo.method === ENCRYPT_METHODS.NONE ||
-    encryptInfo.method === ENCRYPT_METHODS.UNKNOWN
-  ) {
-    return null;
-  }
-
-  return {
-    method: encryptInfo.method,
-    key: encryptInfo.key,
-    iv: encryptInfo.iv,
-    drm: encryptInfo.drm,
-  };
-};
-
 const createInitSegment = (
-  segment: MediaSegment,
+  segment: DashParsedSegment,
   firstSegment: DashSegment | null,
 ): DashSegment => ({
   timestamp: 0,
   duration: 0,
   relativeToUnixEpoch: false,
   firstSegment,
-  sequenceNumber: Number.isFinite(segment.index) ? segment.index : null,
+  sequenceNumber: segment.sequenceNumber,
   location: getSegmentLocation(segment),
-  encryption: getSegmentEncryption(segment.encryptInfo),
+  encryption: segment.encryption,
   initSegment: null,
   lastProgramDateTimeSeconds: null,
 });
 
-const flattenSegments = (playlist?: Playlist) =>
-  playlist?.mediaParts.flatMap((part) => part.mediaSegments) ?? [];
-
-export const playlistToDashSegments = (playlist?: Playlist): DashSegment[] => {
-  const mediaSegments = flattenSegments(playlist);
+export const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] => {
+  const mediaSegments = internalTrack.track.segmentState.mediaSegments;
   if (mediaSegments.length === 0) return [];
 
   let timestamp = 0;
@@ -87,9 +60,9 @@ export const playlistToDashSegments = (playlist?: Playlist): DashSegment[] => {
       duration: mediaSegment.duration,
       relativeToUnixEpoch: false,
       firstSegment: null,
-      sequenceNumber: Number.isFinite(mediaSegment.index) ? mediaSegment.index : null,
+      sequenceNumber: mediaSegment.sequenceNumber,
       location: getSegmentLocation(mediaSegment),
-      encryption: getSegmentEncryption(mediaSegment.encryptInfo),
+      encryption: mediaSegment.encryption,
       initSegment: null,
       lastProgramDateTimeSeconds: null,
     };
@@ -98,8 +71,8 @@ export const playlistToDashSegments = (playlist?: Playlist): DashSegment[] => {
   }
 
   const firstSegment = segments[0] ?? null;
-  const initSegment = playlist?.mediaInit
-    ? createInitSegment(playlist.mediaInit, firstSegment)
+  const initSegment = internalTrack.track.segmentState.initSegment
+    ? createInitSegment(internalTrack.track.segmentState.initSegment, firstSegment)
     : null;
 
   for (const segment of segments) {
@@ -127,7 +100,7 @@ export class DashSegmentedInput {
 
         this.lastSegmentUpdateTime = performance.now();
         await this.internalTrack.demuxer.refreshTrackSegments(this.internalTrack);
-        this.segments = playlistToDashSegments(this.internalTrack.streamInfo.playlist);
+        this.segments = trackToDashSegments(this.internalTrack);
       } finally {
         this.currentUpdateSegmentsPromise = null;
       }
@@ -135,13 +108,13 @@ export class DashSegmentedInput {
   }
 
   getRemainingWaitTimeMs() {
-    const playlist = this.internalTrack.streamInfo.playlist;
-    if (!playlist?.isLive) {
+    const segmentState = this.internalTrack.track.segmentState;
+    if (!segmentState.isLive) {
       return 0;
     }
 
     const elapsed = performance.now() - this.lastSegmentUpdateTime;
-    const result = Math.max(0, playlist.refreshIntervalMs - elapsed);
+    const result = Math.max(0, segmentState.refreshIntervalMs - elapsed);
     return result <= 50 ? 0 : result;
   }
 
@@ -150,11 +123,8 @@ export class DashSegmentedInput {
       await this.runUpdateSegments();
     }
 
-    const playlist = this.internalTrack.streamInfo.playlist;
-    if (!playlist?.isLive) {
-      return null;
-    }
-
-    return playlist.refreshIntervalMs / 1000;
+    return this.internalTrack.track.segmentState.isLive
+      ? this.internalTrack.track.segmentState.refreshIntervalMs / 1000
+      : null;
   }
 }
