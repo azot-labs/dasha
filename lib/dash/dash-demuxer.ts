@@ -1,3 +1,5 @@
+import { DOMParser, type Element } from '@xmldom/xmldom';
+import { Temporal } from 'temporal-polyfill';
 import { InputFormat } from 'mediabunny';
 import type {
   EncodedPacket,
@@ -6,7 +8,23 @@ import type {
   MetadataTags,
   PacketType,
 } from 'mediabunny';
-import { DashManifestParser } from './dash-manifest-parser';
+import {
+  checkIsDescriptive,
+  getDolbyDigitalPlusComplexityIndex,
+  parseChannels,
+} from '../shared/audio';
+import { ENCRYPT_METHODS } from '../shared/encrypt-method';
+import { ROLE_TYPE } from '../shared/role-type';
+import { checkIsClosedCaption, checkIsSdh } from '../shared/subtitle';
+import { combineUrl, replaceVars } from '../shared/util';
+import { parseDynamicRange } from '../shared/video';
+import {
+  type DashEncryptionData,
+  type DashParsedSegment,
+  type DashParsedTrack,
+  type DashSegmentState,
+  getDashTrackMatchKey,
+} from './dash-model';
 import {
   DASH_MIME_TYPE,
   getSourceHeaders,
@@ -14,6 +32,14 @@ import {
   isLikelyDashPath,
   loadDashManifest,
 } from './dash-misc';
+import {
+  createDashTrackDescriptor,
+  extendDashBaseUrl,
+  filterDashLanguage,
+  getDashFrameRate,
+  getDashTagAttrs,
+} from './dash-misc';
+import { DASH_TAGS } from './dash-tags';
 import { type DashSegment, DashSegmentedInput } from './dash-segmented-input';
 import {
   createDashInternalTracks,
@@ -21,31 +47,687 @@ import {
   type DashInputTrackBacking,
   type DashInternalTrack,
 } from './dash-track-backing';
+import { parseRange } from './dash-utils';
 
 export type { DashSegment } from './dash-segmented-input';
 export { DashSegmentedInput } from './dash-segmented-input';
+
+const DASH_NAMESPACE_MAP = new Map([
+  ['cenc', 'urn:mpeg:cenc:2013'],
+  ['mspr', 'urn:microsoft:playready'],
+  ['mas', 'urn:marlin:mas:1-0:services:schemas:mpd'],
+]);
+
+const WIDEVINE_SYSTEM_ID = 'edef8ba9-79d6-4ace-a3c8-27dcd51d21ed';
+const PLAYREADY_SYSTEM_ID = '9a04f079-9840-4286-ab92-e65be0885f95';
+
+const isMissingNamespace = (rawText: string, tag: string) =>
+  !rawText.includes(`xmlns:${tag}`) && rawText.includes(`<${tag}:`);
+
+const replaceFirst = (source: string, oldValue: string, newValue: string) => {
+  const index = source.indexOf(oldValue);
+  return index < 0
+    ? source
+    : source.slice(0, index) + newValue + source.slice(index + oldValue.length);
+};
+
+const processDashContent = (mpdContent: string) => {
+  const missingNamespaceKeys = Array.from(
+    DASH_NAMESPACE_MAP.keys().filter((key) => isMissingNamespace(mpdContent, key)),
+  );
+  if (!missingNamespaceKeys.length) return mpdContent;
+
+  const missingNamespaceDefinitions = missingNamespaceKeys.map(
+    (key) => `xmlns:${key}="${DASH_NAMESPACE_MAP.get(key)}"`,
+  );
+  return replaceFirst(mpdContent, '<MPD ', `<MPD ${missingNamespaceDefinitions.join(' ')} `);
+};
+
+const createSegmentState = (isLive: boolean, timeShiftBufferDepth: string): DashSegmentState => ({
+  isLive,
+  refreshIntervalMs: Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2,
+  initSegment: null,
+  mediaSegments: [],
+});
+
+const addWholeResourceSegment = (segmentState: DashSegmentState, url: string, duration: number) => {
+  segmentState.mediaSegments.push({
+    sequenceNumber: 0,
+    duration,
+    url,
+    encryption: null,
+  });
+};
+
+const createRangedSegment = (
+  url: string,
+  sequenceNumber: number,
+  range?: string | null,
+): DashParsedSegment => {
+  const segment: DashParsedSegment = {
+    sequenceNumber,
+    duration: 0,
+    url,
+    encryption: null,
+  };
+
+  if (range) {
+    const [start, expect] = parseRange(range);
+    segment.startRange = start;
+    segment.expectLength = expect;
+  }
+
+  return segment;
+};
+
+const getRoleType = (roleValue: string) => {
+  const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
+  const roleTypeKey = roleValue.split('-').map(capitalize).join('');
+  return ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
+};
+
+const createTrack = (params: {
+  adaptationSet: Element;
+  bitrate: number;
+  contentType: string | null;
+  frameRate: number | undefined;
+  isLive: boolean;
+  manifestUrl: string;
+  mimeType: string | null;
+  originalUrl: string;
+  period: Element;
+  publishTime: string | null;
+  representation: Element;
+  timeShiftBufferDepth: string;
+}) => {
+  const {
+    adaptationSet,
+    contentType,
+    frameRate,
+    isLive,
+    manifestUrl,
+    mimeType,
+    originalUrl,
+    period,
+    publishTime,
+    representation,
+    timeShiftBufferDepth,
+  } = params;
+  const bitrate = params.bitrate;
+  const descriptor = createDashTrackDescriptor({
+    codecs: representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs'),
+    contentType,
+    mimeType,
+  });
+  const segmentState = createSegmentState(isLive, timeShiftBufferDepth);
+  const track = {
+    type: descriptor.type,
+    codec: descriptor.codec,
+    codecString: descriptor.codecString,
+    manifestUrl,
+    originalUrl,
+    peakBitrate: bitrate,
+    averageBitrate: bitrate,
+    name: null,
+    default: false,
+    groupId: representation.getAttribute('id'),
+    periodId: period.getAttribute('id'),
+    extension: null,
+    segmentState,
+  } as DashParsedTrack;
+
+  const roles = getDashTagAttrs('Role', representation, adaptationSet);
+  const supplementalProps = getDashTagAttrs('SupplementalProperty', representation, adaptationSet);
+  const essentialProps = getDashTagAttrs('EssentialProperty', representation, adaptationSet);
+  const accessibilities = getDashTagAttrs('Accessibility', representation, adaptationSet);
+  const audioChannelConfigs = getDashTagAttrs(
+    'AudioChannelConfiguration',
+    adaptationSet,
+    representation,
+  );
+  const channelsString = audioChannelConfigs[0]?.value;
+  const width = representation.getAttribute('width');
+  const height = representation.getAttribute('height');
+
+  track.languageCode = filterDashLanguage(
+    representation.getAttribute('lang') || adaptationSet.getAttribute('lang'),
+  );
+
+  const volumeAdjust = representation.getAttribute('volumeAdjust');
+  if (volumeAdjust) {
+    track.groupId = `${track.groupId}-${volumeAdjust}`;
+  }
+
+  const actualMimeType =
+    representation.getAttribute('mimeType') || adaptationSet.getAttribute('mimeType');
+  if (actualMimeType) {
+    const mimeTypeSplit = actualMimeType.split('/');
+    track.extension = mimeTypeSplit.length === 2 ? mimeTypeSplit[1] : null;
+  }
+
+  if (track.type === 'video') {
+    track.width = Number(width);
+    track.height = Number(height);
+    track.frameRate = frameRate || getDashFrameRate(representation);
+    if (track.codecString && supplementalProps && essentialProps) {
+      track.dynamicRange = parseDynamicRange(track.codecString, supplementalProps, essentialProps);
+    }
+  } else if (track.type === 'audio') {
+    if (accessibilities) {
+      track.descriptive = checkIsDescriptive(accessibilities);
+    }
+    if (supplementalProps) {
+      track.joc = getDolbyDigitalPlusComplexityIndex(supplementalProps);
+    }
+    if (channelsString) {
+      track.numberOfChannels = parseChannels(channelsString);
+    }
+  } else {
+    if (roles) {
+      track.cc = checkIsClosedCaption(roles);
+    }
+    if (accessibilities) {
+      track.sdh = checkIsSdh(accessibilities);
+    }
+  }
+
+  const role = roles[0];
+  if (role?.value) {
+    track.role = getRoleType(role.value);
+  }
+
+  if (publishTime) {
+    track.publishTime = new Date(publishTime);
+  }
+
+  return track;
+};
+
+const normalizeTrackExtension = (track: DashParsedTrack) => {
+  if (track.type === 'subtitle' && track.extension === 'mp4') {
+    track.extension = 'm4s';
+  }
+
+  if (
+    track.type !== 'subtitle' &&
+    (track.extension == null || track.segmentState.mediaSegments.length > 1)
+  ) {
+    track.extension = 'm4s';
+  }
+};
+
+const applySegmentBase = (representation: Element, track: DashParsedTrack, segBaseUrl: string) => {
+  const segmentBaseElement = representation.getElementsByTagName('SegmentBase')[0];
+  if (!segmentBaseElement) return;
+
+  const initialization = segmentBaseElement.getElementsByTagName('Initialization')[0];
+  if (!initialization) return;
+
+  const sourceUrl = initialization.getAttribute('sourceURL');
+  if (!sourceUrl) return;
+
+  track.segmentState.initSegment = createRangedSegment(
+    combineUrl(segBaseUrl, sourceUrl),
+    -1,
+    initialization.getAttribute('range'),
+  );
+};
+
+const applySegmentList = (representation: Element, track: DashParsedTrack, segBaseUrl: string) => {
+  const segmentList = representation.getElementsByTagName('SegmentList')[0];
+  if (!segmentList) return;
+
+  const initialization = segmentList.getElementsByTagName('Initialization')[0];
+  if (initialization) {
+    const sourceUrl = initialization.getAttribute('sourceURL');
+    if (sourceUrl) {
+      track.segmentState.initSegment = createRangedSegment(
+        combineUrl(segBaseUrl, sourceUrl),
+        -1,
+        initialization.getAttribute('range'),
+      );
+    }
+  }
+
+  const duration = Number(segmentList.getAttribute('duration'));
+  const timescale = Number(segmentList.getAttribute('timescale') || '1');
+
+  for (const [segmentIndex, segmentUrl] of Array.from(
+    segmentList.getElementsByTagName('SegmentURL'),
+  ).entries()) {
+    const media = segmentUrl.getAttribute('media');
+    if (!media) continue;
+
+    const segment = createRangedSegment(
+      combineUrl(segBaseUrl, media),
+      segmentIndex,
+      segmentUrl.getAttribute('mediaRange'),
+    );
+    segment.duration = duration / timescale;
+    track.segmentState.mediaSegments.push(segment);
+  }
+};
+
+const appendTemplatedSegment = (params: {
+  currentTime: number;
+  duration: number;
+  hasTimePlaceholder: boolean;
+  index: number;
+  mediaTemplate: string;
+  segmentState: DashSegmentState;
+  segmentNumber: number;
+  segBaseUrl: string;
+  timescale: number;
+  variables: Record<string, string>;
+}) => {
+  const {
+    currentTime,
+    duration,
+    hasTimePlaceholder,
+    index,
+    mediaTemplate,
+    segmentState,
+    segmentNumber,
+    segBaseUrl,
+    timescale,
+    variables,
+  } = params;
+  variables[DASH_TAGS.TemplateTime] = String(currentTime);
+  variables[DASH_TAGS.TemplateNumber] = String(segmentNumber);
+
+  segmentState.mediaSegments.push({
+    sequenceNumber: index,
+    duration: duration / timescale,
+    url: combineUrl(segBaseUrl, replaceVars(mediaTemplate, variables)),
+    encryption: null,
+    ...(hasTimePlaceholder ? { nameFromVar: String(currentTime) } : {}),
+  });
+};
+
+const applySegmentTimeline = (params: {
+  mediaTemplate: string;
+  periodDurationSeconds: number;
+  segmentState: DashSegmentState;
+  segBaseUrl: string;
+  startNumberString: string;
+  timeline: Element;
+  timescaleString: string;
+  variables: Record<string, string>;
+}) => {
+  const {
+    mediaTemplate,
+    periodDurationSeconds,
+    segmentState,
+    segBaseUrl,
+    startNumberString,
+    timeline,
+    timescaleString,
+    variables,
+  } = params;
+  const timelineEntries = timeline.getElementsByTagName('S');
+  const timescale = Number(timescaleString);
+  const hasTimePlaceholder = mediaTemplate.includes(DASH_TAGS.TemplateTime);
+  let segmentNumber = Number(startNumberString);
+  let currentTime = 0;
+  let segmentIndex = 0;
+
+  for (const entry of timelineEntries) {
+    const startTime = entry.getAttribute('t');
+    if (startTime) currentTime = Number(startTime);
+
+    const duration = Number(entry.getAttribute('d'));
+    let repeatCount = Number(entry.getAttribute('r'));
+
+    appendTemplatedSegment({
+      currentTime,
+      duration,
+      hasTimePlaceholder,
+      index: segmentIndex++,
+      mediaTemplate,
+      segmentState,
+      segmentNumber: segmentNumber++,
+      segBaseUrl,
+      timescale,
+      variables,
+    });
+
+    if (repeatCount < 0) {
+      repeatCount = Math.ceil((periodDurationSeconds * timescale) / duration) - 1;
+    }
+
+    for (let i = 0; i < repeatCount; i++) {
+      currentTime += duration;
+      appendTemplatedSegment({
+        currentTime,
+        duration,
+        hasTimePlaceholder,
+        index: segmentIndex++,
+        mediaTemplate,
+        segmentState,
+        segmentNumber: segmentNumber++,
+        segBaseUrl,
+        timescale,
+        variables,
+      });
+    }
+
+    currentTime += duration;
+  }
+};
+
+const applyFixedDurationTemplate = (params: {
+  availabilityStartTime: string | null;
+  durationString: string;
+  isLive: boolean;
+  mediaTemplate: string;
+  periodDurationSeconds: number;
+  segmentState: DashSegmentState;
+  presentationTimeOffset: string;
+  segBaseUrl: string;
+  startNumberString: string;
+  timeShiftBufferDepth: string;
+  timescaleString: string;
+  variables: Record<string, string>;
+}) => {
+  const {
+    availabilityStartTime,
+    durationString,
+    isLive,
+    mediaTemplate,
+    periodDurationSeconds,
+    segmentState,
+    presentationTimeOffset,
+    segBaseUrl,
+    startNumberString,
+    timeShiftBufferDepth,
+    timescaleString,
+    variables,
+  } = params;
+  const timescale = Number(timescaleString);
+  const duration = Number(durationString);
+  const hasNumberPlaceholder = mediaTemplate.includes(DASH_TAGS.TemplateNumber);
+  let startNumber = Number(startNumberString);
+  let totalNumber = Math.ceil((periodDurationSeconds * timescale) / duration);
+
+  if (totalNumber === 0 && isLive) {
+    if (!availabilityStartTime) {
+      throw new Error('Invalid live MPD: availabilityStartTime is required.');
+    }
+
+    const now = Date.now();
+    const availableTime = new Date(availabilityStartTime);
+    const offsetMs = Number(presentationTimeOffset) / 1000;
+    availableTime.setUTCMilliseconds(availableTime.getUTCMilliseconds() + offsetMs);
+    const elapsedSeconds = (now - availableTime.getTime()) / 1000;
+    const updateWindowSeconds = Temporal.Duration.from(timeShiftBufferDepth).total('seconds');
+    startNumber += ((elapsedSeconds - updateWindowSeconds) * timescale) / duration;
+    totalNumber = (updateWindowSeconds * timescale) / duration;
+  }
+
+  for (let number = startNumber, segmentIndex = 0; number < startNumber + totalNumber; number++) {
+    variables[DASH_TAGS.TemplateNumber] = String(number);
+
+    segmentState.mediaSegments.push({
+      sequenceNumber: isLive ? number : segmentIndex++,
+      duration: duration / timescale,
+      url: combineUrl(segBaseUrl, replaceVars(mediaTemplate, variables)),
+      encryption: null,
+      ...(hasNumberPlaceholder ? { nameFromVar: String(number) } : {}),
+    });
+  }
+};
+
+const applySegmentTemplate = (params: {
+  adaptationSet: Element;
+  availabilityStartTime: string | null;
+  bitrate: number;
+  groupId: string | null;
+  isLive: boolean;
+  periodDurationSeconds: number;
+  representation: Element;
+  segBaseUrl: string;
+  segmentState: DashSegmentState;
+  timeShiftBufferDepth: string;
+}) => {
+  const {
+    adaptationSet,
+    availabilityStartTime,
+    bitrate,
+    groupId,
+    isLive,
+    periodDurationSeconds,
+    representation,
+    segBaseUrl,
+    segmentState,
+    timeShiftBufferDepth,
+  } = params;
+  const adaptationSetTemplates = adaptationSet.getElementsByTagName('SegmentTemplate');
+  const representationTemplates = representation.getElementsByTagName('SegmentTemplate');
+  if (!adaptationSetTemplates.length && !representationTemplates.length) return;
+
+  const segmentTemplate = representationTemplates[0] || adaptationSetTemplates[0];
+  const fallbackTemplate = adaptationSetTemplates[0] || representationTemplates[0];
+  const variables: Record<string, string> = {
+    [DASH_TAGS.TemplateBandwidth]: String(bitrate),
+    [DASH_TAGS.TemplateRepresentationID]: groupId ?? '',
+  };
+
+  const presentationTimeOffset =
+    segmentTemplate.getAttribute('presentationTimeOffset') ||
+    fallbackTemplate.getAttribute('presentationTimeOffset') ||
+    '0';
+  const timescaleString =
+    segmentTemplate.getAttribute('timescale') || fallbackTemplate.getAttribute('timescale') || '1';
+  const durationString =
+    segmentTemplate.getAttribute('duration') || fallbackTemplate.getAttribute('duration');
+  const startNumberString =
+    segmentTemplate.getAttribute('startNumber') ||
+    fallbackTemplate.getAttribute('startNumber') ||
+    '1';
+  const initialization =
+    segmentTemplate.getAttribute('initialization') ||
+    fallbackTemplate.getAttribute('initialization');
+
+  if (initialization) {
+    segmentState.initSegment = {
+      sequenceNumber: -1,
+      duration: 0,
+      url: combineUrl(segBaseUrl, replaceVars(initialization, variables)),
+      encryption: null,
+    };
+  }
+
+  const mediaTemplate =
+    segmentTemplate.getAttribute('media') || fallbackTemplate.getAttribute('media');
+  if (!mediaTemplate) return;
+
+  const segmentTimeline = segmentTemplate.getElementsByTagName('SegmentTimeline')[0];
+  if (segmentTimeline) {
+    applySegmentTimeline({
+      mediaTemplate,
+      periodDurationSeconds,
+      segmentState,
+      segBaseUrl,
+      startNumberString,
+      timeline: segmentTimeline,
+      timescaleString,
+      variables,
+    });
+    return;
+  }
+
+  if (!durationString) return;
+
+  applyFixedDurationTemplate({
+    availabilityStartTime,
+    durationString,
+    isLive,
+    mediaTemplate,
+    periodDurationSeconds,
+    segmentState,
+    presentationTimeOffset,
+    segBaseUrl,
+    startNumberString,
+    timeShiftBufferDepth,
+    timescaleString,
+    variables,
+  });
+};
+
+const ensureFallbackMediaSegment = (
+  track: DashParsedTrack,
+  segBaseUrl: string,
+  periodDurationSeconds: number,
+) => {
+  if (track.segmentState.mediaSegments.length > 0) return;
+  addWholeResourceSegment(track.segmentState, segBaseUrl, periodDurationSeconds);
+};
+
+const cloneEncryption = (encryption: DashEncryptionData | null): DashEncryptionData | null =>
+  encryption
+    ? {
+        method: encryption.method,
+        key: encryption.key,
+        iv: encryption.iv,
+        drm: { ...encryption.drm },
+      }
+    : null;
+
+const applyContentProtection = (
+  adaptationSet: Element,
+  representation: Element,
+  track: DashParsedTrack,
+) => {
+  const adaptationSetProtections = adaptationSet.getElementsByTagName('ContentProtection');
+  const representationProtections = representation.getElementsByTagName('ContentProtection');
+  const contentProtections = representationProtections[0]
+    ? representationProtections
+    : adaptationSetProtections;
+  if (!contentProtections.length) return;
+
+  const encryption: DashEncryptionData = {
+    method: ENCRYPT_METHODS.CENC,
+    drm: {},
+  };
+
+  for (const contentProtection of contentProtections) {
+    const schemeIdUri = contentProtection.getAttribute('schemeIdUri');
+    const defaultKID = contentProtection.getAttribute('cenc:default_KID') || undefined;
+    const pssh =
+      contentProtection.getElementsByTagName('cenc:pssh')[0]?.textContent?.trim() || undefined;
+    const drmData = { keyId: defaultKID, pssh };
+
+    if (schemeIdUri?.includes(WIDEVINE_SYSTEM_ID)) {
+      encryption.drm.widevine = drmData;
+    } else if (schemeIdUri?.includes(PLAYREADY_SYSTEM_ID)) {
+      encryption.drm.playready = drmData;
+    }
+  }
+
+  if (track.segmentState.initSegment) {
+    track.segmentState.initSegment.encryption = cloneEncryption(encryption);
+  }
+
+  for (const segment of track.segmentState.mediaSegments) {
+    if (!segment.encryption) {
+      segment.encryption = cloneEncryption(encryption);
+    }
+  }
+};
+
+const mergePeriodTrack = (tracks: DashParsedTrack[], track: DashParsedTrack, isLive: boolean) => {
+  const existingTrackIndex = tracks.findIndex(
+    (item) =>
+      item.type === track.type &&
+      item.periodId !== track.periodId &&
+      item.groupId === track.groupId &&
+      (item.type === 'video' && track.type === 'video'
+        ? item.width === track.width && item.height === track.height
+        : true),
+  );
+  if (existingTrackIndex < 0) {
+    tracks.push(track);
+    return;
+  }
+
+  if (isLive) {
+    return;
+  }
+
+  const existingTrack = tracks[existingTrackIndex];
+  if (!existingTrack) {
+    return;
+  }
+
+  const lastSegment = existingTrack.segmentState.mediaSegments.at(-1);
+  const incomingSegments = track.segmentState.mediaSegments;
+  const incomingLastSegment = incomingSegments.at(-1);
+  if (!lastSegment || !incomingLastSegment) {
+    return;
+  }
+
+  if (lastSegment.url !== incomingLastSegment.url) {
+    const startIndex = (lastSegment.sequenceNumber ?? 0) + 1;
+    for (const segment of incomingSegments) {
+      if (segment.sequenceNumber !== null) {
+        segment.sequenceNumber += startIndex;
+      }
+    }
+    existingTrack.segmentState.mediaSegments.push(...incomingSegments);
+    return;
+  }
+
+  lastSegment.duration += incomingSegments.reduce((sum, segment) => sum + segment.duration, 0);
+};
+
+const linkDefaultGroups = (tracks: DashParsedTrack[]) => {
+  const audioList = tracks.filter((track) => track.type === 'audio');
+  const subtitleList = tracks.filter((track) => track.type === 'subtitle');
+  const videoList = tracks.filter((track) => track.type === 'video');
+
+  for (const video of videoList) {
+    const audioGroupId = audioList
+      .toSorted((a, b) => (b.peakBitrate || 0) - (a.peakBitrate || 0))
+      .at(0)?.groupId;
+    const subtitleGroupId = subtitleList
+      .toSorted((a, b) => (b.peakBitrate || 0) - (a.peakBitrate || 0))
+      .at(0)?.groupId;
+
+    if (audioGroupId) {
+      video.audioGroupId = audioGroupId;
+    }
+    if (subtitleGroupId) {
+      video.subtitleGroupId = subtitleGroupId;
+    }
+  }
+};
 
 class DashDemuxer {
   metadataPromise: Promise<void> | null = null;
   trackBackings: DashInputTrackBacking[] | null = null;
   internalTracks: DashInternalTrack[] | null = null;
   segmentedInputs: DashSegmentedInput[] = [];
-  parser: DashManifestParser | null = null;
+  manifestUrl = '';
+  originalUrl = '';
+  headers: Record<string, string>;
+  #mpdUrl = '';
+  #baseUrl = '';
+  #mpdContent = '';
 
-  constructor(readonly input: MediabunnyInput) {}
+  constructor(readonly input: MediabunnyInput) {
+    this.headers = getSourceHeaders(input.source);
+  }
 
   readMetadata() {
     return (this.metadataPromise ??= (async () => {
       const { text, url } = await loadDashManifest(this.input.source);
-      const parser = new DashManifestParser({
-        headers: getSourceHeaders(this.input.source),
-        originalUrl: url,
-        url,
-      });
-      const tracks = await parser.extractTracks(text.trim());
+      this.manifestUrl = url;
+      this.originalUrl = url;
+      this.#resetManifestUrls();
+
+      const tracks = this.#extractTracks(text.trim());
       const internalTracks = createDashInternalTracks(this, tracks);
 
-      this.parser = parser;
       this.internalTracks = internalTracks;
       this.trackBackings = createDashTrackBackings(internalTracks);
     })());
@@ -75,18 +757,15 @@ class DashDemuxer {
   async refreshTrackSegments(track: DashInternalTrack) {
     await this.readMetadata();
 
-    if (!track.track.segmentState.isLive || !this.parser) {
+    if (!track.track.segmentState.isLive) {
       return;
     }
-    if (
-      !this.parser.manifestUrl.startsWith('http://') &&
-      !this.parser.manifestUrl.startsWith('https://')
-    ) {
+    if (!this.manifestUrl.startsWith('http://') && !this.manifestUrl.startsWith('https://')) {
       return;
     }
 
     const tracks = this.internalTracks?.map((internalTrack) => internalTrack.track) ?? [];
-    await this.parser.refreshTracks(tracks);
+    await this.#refreshTracks(tracks);
   }
 
   async getMimeType() {
@@ -99,6 +778,139 @@ class DashDemuxer {
 
   dispose() {
     this.segmentedInputs.length = 0;
+  }
+
+  #extractTracks(rawText: string): DashParsedTrack[] {
+    const tracks: DashParsedTrack[] = [];
+
+    this.#mpdContent = processDashContent(rawText);
+
+    const document = new DOMParser().parseFromString(this.#mpdContent, 'text/xml');
+    const mpdElement = document.getElementsByTagName('MPD')[0];
+    const isLive = mpdElement.getAttribute('type') === 'dynamic';
+    const availabilityStartTime = mpdElement.getAttribute('availabilityStartTime');
+    const timeShiftBufferDepth = mpdElement.getAttribute('timeShiftBufferDepth') || 'PT1M';
+    const publishTime = mpdElement.getAttribute('publishTime');
+    const mediaPresentationDuration = mpdElement.getAttribute('mediaPresentationDuration');
+
+    const baseUrlElement = mpdElement.getElementsByTagName('BaseURL')[0];
+    if (baseUrlElement?.textContent) {
+      let baseUrl = baseUrlElement.textContent;
+      if (baseUrl.includes('kkbox.com.tw/')) {
+        baseUrl = baseUrl.replace('//https:%2F%2F', '//');
+      }
+      this.#baseUrl = combineUrl(this.#mpdUrl, baseUrl);
+    }
+
+    for (const period of mpdElement.getElementsByTagName('Period')) {
+      const periodDurationSeconds = Temporal.Duration.from(
+        period.getAttribute('duration') || mediaPresentationDuration || 'PT0S',
+      ).total('seconds');
+      const periodBaseUrl = extendDashBaseUrl(period, this.#baseUrl);
+
+      for (const adaptationSet of period.getElementsByTagName('AdaptationSet')) {
+        const adaptationSetBaseUrl = extendDashBaseUrl(adaptationSet, periodBaseUrl);
+        const adaptationSetFrameRate = getDashFrameRate(adaptationSet);
+        let contentType = adaptationSet.getAttribute('contentType');
+        let mimeType = adaptationSet.getAttribute('mimeType');
+
+        for (const representation of adaptationSet.getElementsByTagName('Representation')) {
+          const segBaseUrl = extendDashBaseUrl(representation, adaptationSetBaseUrl);
+          contentType ||= representation.getAttribute('contentType');
+          mimeType ||= representation.getAttribute('mimeType');
+          const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
+          const track = createTrack({
+            adaptationSet,
+            bitrate,
+            contentType,
+            frameRate: adaptationSetFrameRate,
+            isLive,
+            manifestUrl: this.#mpdUrl,
+            mimeType,
+            originalUrl: this.originalUrl,
+            period,
+            publishTime,
+            representation,
+            timeShiftBufferDepth,
+          });
+
+          applySegmentBase(representation, track, segBaseUrl);
+          applySegmentList(representation, track, segBaseUrl);
+          applySegmentTemplate({
+            adaptationSet,
+            availabilityStartTime,
+            bitrate,
+            groupId: track.groupId,
+            isLive,
+            periodDurationSeconds,
+            representation,
+            segBaseUrl,
+            segmentState: track.segmentState,
+            timeShiftBufferDepth,
+          });
+          ensureFallbackMediaSegment(track, segBaseUrl, periodDurationSeconds);
+          normalizeTrackExtension(track);
+          applyContentProtection(adaptationSet, representation, track);
+
+          mergePeriodTrack(tracks, track, isLive);
+        }
+      }
+    }
+
+    linkDefaultGroups(tracks);
+    return tracks;
+  }
+
+  async #refreshTracks(tracks: DashParsedTrack[]): Promise<void> {
+    if (!tracks.length) return;
+
+    const response = await this.#fetchManifest(this.manifestUrl).catch(() =>
+      this.#fetchManifest(this.originalUrl),
+    );
+    const rawText = await response.text();
+
+    this.manifestUrl = response.url;
+    this.#resetManifestUrls();
+
+    const newTracks = this.#extractTracks(rawText);
+    for (const track of tracks) {
+      let matchingTracks = newTracks.filter(
+        (candidate) => getDashTrackMatchKey(candidate) === getDashTrackMatchKey(track),
+      );
+      if (!matchingTracks.length) {
+        matchingTracks = newTracks.filter(
+          (candidate) =>
+            candidate.segmentState.initSegment?.url === track.segmentState.initSegment?.url,
+        );
+      }
+
+      const nextTrack = matchingTracks[0];
+      if (!nextTrack) {
+        continue;
+      }
+
+      track.segmentState = nextTrack.segmentState;
+      track.publishTime = nextTrack.publishTime;
+      track.manifestUrl = nextTrack.manifestUrl;
+      track.originalUrl = nextTrack.originalUrl;
+      track.audioGroupId = nextTrack.audioGroupId;
+      track.subtitleGroupId = nextTrack.subtitleGroupId;
+    }
+  }
+
+  async #fetchManifest(url: string) {
+    const response = await fetch(url, { headers: this.headers });
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch DASH manifest: ${response.status} ${response.statusText} (${response.url})`,
+      );
+    }
+    return response;
+  }
+
+  #resetManifestUrls() {
+    this.#mpdUrl = this.manifestUrl;
+    this.#baseUrl = this.#mpdUrl;
   }
 }
 
