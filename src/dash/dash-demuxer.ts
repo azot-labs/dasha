@@ -8,16 +8,12 @@ import type {
   MetadataTags,
   PacketType,
 } from 'mediabunny';
-import {
-  checkIsDescriptive,
-  getDolbyDigitalPlusComplexityIndex,
-  parseChannels,
-} from '../shared/audio';
-import { ENCRYPT_METHODS } from '../shared/encrypt-method';
-import { ROLE_TYPE } from '../shared/role-type';
-import { checkIsClosedCaption, checkIsSdh } from '../shared/subtitle';
-import { combineUrl } from '../shared/util';
-import { parseDynamicRange } from '../shared/video';
+import { checkIsDescriptive, getDolbyDigitalPlusComplexityIndex, parseChannels } from '../audio';
+import { ENCRYPT_METHODS } from '../encrypt-method';
+import { ROLE_TYPE } from '../role-type';
+import { checkIsClosedCaption, checkIsSdh } from '../subtitle';
+import { combineUrl } from '../util';
+import { parseDynamicRange } from '../video';
 import {
   DASH_MIME_TYPE,
   DASH_TEMPLATE_BANDWIDTH,

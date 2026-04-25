@@ -28,7 +28,7 @@ const parseAudioCodec = (codecs: string) => {
   for (const mime of mimes) {
     try {
       return parseAudioCodecFromMime(mime);
-    } catch (e) {
+    } catch {
       continue;
     }
   }
@@ -38,7 +38,7 @@ const parseAudioCodec = (codecs: string) => {
 export const tryParseAudioCodec = (codecs: string) => {
   try {
     return parseAudioCodec(codecs);
-  } catch (e) {
+  } catch {
     return undefined;
   }
 };

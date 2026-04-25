@@ -7,7 +7,7 @@ import type {
   TrackDisposition,
   VideoCodec,
 } from 'mediabunny';
-import { ROLE_TYPE } from '../shared/role-type';
+import { ROLE_TYPE } from '../role-type';
 import {
   type DashParsedAudioTrack,
   type DashParsedTrack,

@@ -1,13 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { Element, LiveNodeList } from '@xmldom/xmldom';
 import type { Source } from 'mediabunny';
-import { combineUrl } from '../shared/util';
-import type { MediaCodec, VideoDynamicRange } from '../shared/codec';
-import { tryParseVideoCodec } from '../shared/video';
-import { tryParseSubtitleCodec } from '../shared/subtitle';
-import { tryParseAudioCodec } from '../shared/audio';
-import { pipe } from '../shared/pipe';
-import type { RoleType } from '../shared/role-type';
+import { combineUrl } from '../util';
+import type { MediaCodec, VideoDynamicRange } from '../codec';
+import { tryParseVideoCodec } from '../video';
+import { tryParseSubtitleCodec } from '../subtitle';
+import { tryParseAudioCodec } from '../audio';
+import { pipe } from '../pipe';
+import type { RoleType } from '../role-type';
 
 export const DASH_MIME_TYPE = 'application/dash+xml';
 export const DASH_TEMPLATE_REPRESENTATION_ID = '$RepresentationID$';
