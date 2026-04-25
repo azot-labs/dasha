@@ -1,6 +1,16 @@
 import { readFile } from 'node:fs/promises';
-import { desc, prefer } from 'mediabunny';
-import type { Source } from 'mediabunny';
+import { InputFormat } from 'mediabunny';
+import type {
+  AudioCodec,
+  EncodedPacket,
+  Input as MediabunnyInput,
+  MediaCodec,
+  MetadataTags,
+  PacketType,
+  Source,
+  TrackDisposition,
+  VideoCodec,
+} from 'mediabunny';
 import { ParserConfig } from './parser-config';
 import { DashExtractor } from './dash/dash-extractor';
 import type { EncryptInfo } from './shared/encrypt-info';
@@ -14,25 +24,6 @@ import type {
   SubtitleStreamInfo,
   VideoStreamInfo,
 } from './shared/stream-info';
-
-// TODO: Remove this once mediabunny will ship DASH support ^^
-
-type MaybePromise<T> = T | Promise<T>;
-
-export type TrackDisposition = {
-  default: boolean;
-  primary: boolean;
-  forced: boolean;
-  original: boolean;
-  commentary: boolean;
-  hearingImpaired: boolean;
-  visuallyImpaired: boolean;
-};
-
-export type InputTrackQuery<T> = {
-  filter?: (track: T) => MaybePromise<boolean>;
-  sortBy?: (track: T) => MaybePromise<number | number[]>;
-};
 
 export type Segment = {
   timestamp: number;
@@ -66,14 +57,14 @@ export type DashSegment = Segment & {
 export class DashSegmentedInput {
   segments: DashSegment[] = [];
 
-  #track: DashInputTrack;
+  #track: DashTrackBacking;
 
-  constructor(track: DashInputTrack) {
+  constructor(track: DashTrackBacking) {
     this.#track = track;
   }
 
   async runUpdateSegments(): Promise<void> {
-    await this.#track.input.refreshSegments(this.#track);
+    await this.#track.session.refreshSegments(this.#track.streamInfo);
     this.segments = this.#track.toSegments();
   }
 }
@@ -86,43 +77,6 @@ const DEFAULT_DISPOSITION: TrackDisposition = {
   commentary: false,
   hearingImpaired: false,
   visuallyImpaired: false,
-};
-
-const toQuerySortArray = (value: number | number[]) => (Array.isArray(value) ? value : [value]);
-
-const compareNumbers = (a: number[], b: number[]) => {
-  const length = Math.max(a.length, b.length);
-  for (let index = 0; index < length; index++) {
-    const left = a[index] ?? 0;
-    const right = b[index] ?? 0;
-    if (left !== right) return left - right;
-  }
-  return 0;
-};
-
-const queryTracks = async <T>(tracks: T[], query?: InputTrackQuery<T>) => {
-  if (!query) return [...tracks];
-
-  const filtered: T[] = [];
-  for (const track of tracks) {
-    const allowed = (await query.filter?.(track)) ?? true;
-    if (allowed) filtered.push(track);
-  }
-
-  if (!query.sortBy) return filtered;
-
-  const sortValues = await Promise.all(
-    filtered.map(async (track, index) => ({
-      index,
-      track,
-      order: toQuerySortArray(await query.sortBy!(track)),
-    })),
-  );
-
-  sortValues.sort(
-    (left, right) => compareNumbers(left.order, right.order) || left.index - right.index,
-  );
-  return sortValues.map((item) => item.track);
 };
 
 const normalizeHeaders = (headers: HeadersInit | undefined): Record<string, string> => {
@@ -198,6 +152,14 @@ const loadManifestText = async (source: Source) => {
     url: parseOriginalUrlFromManifest(text) ?? manifestPath,
   };
 };
+
+const isLikelyDashPath = (source: Source) => {
+  const path = getSourcePath(source);
+  if (!path) return false;
+  return path.toLowerCase().split(/[?#]/, 1)[0]?.endsWith('.mpd') ?? false;
+};
+
+const isDashManifestText = (text: string) => /<MPD(?:\s|>)/i.test(text);
 
 const getSegmentLocation = (segment: MediaSegment): DashSegmentLocation => ({
   path: segment.url,
@@ -275,51 +237,208 @@ const playlistToSegments = (playlist?: Playlist): DashSegment[] => {
   return segments;
 };
 
-abstract class DashInputTrackBase {
-  readonly input: DashInput;
-  readonly streamInfo: MediaStreamInfo;
+const getDisposition = (streamInfo: MediaStreamInfo): TrackDisposition => {
+  const subtitleStreamInfo =
+    streamInfo.type === 'subtitle' ? (streamInfo as SubtitleStreamInfo) : undefined;
+  const audioStreamInfo = streamInfo.type === 'audio' ? (streamInfo as AudioStreamInfo) : undefined;
 
-  readonly id: number;
-  readonly number: number;
+  return {
+    ...DEFAULT_DISPOSITION,
+    default: !!streamInfo.default,
+    commentary: streamInfo.role === ROLE_TYPE.Commentary,
+    hearingImpaired: !!subtitleStreamInfo?.sdh,
+    visuallyImpaired: !!audioStreamInfo?.descriptive,
+    forced: streamInfo.role === ROLE_TYPE.ForcedSubtitle || !!subtitleStreamInfo?.forced,
+  };
+};
+
+const canPairStreams = (left: MediaStreamInfo, right: MediaStreamInfo) => {
+  if (left === right || left.type === right.type) return false;
+
+  if (left.type === 'video' && right.type === 'audio') {
+    return !left.audioId || left.audioId === right.groupId;
+  }
+
+  if (left.type === 'audio' && right.type === 'video') {
+    return !right.audioId || right.audioId === left.groupId;
+  }
+
+  if (left.type === 'video' && right.type === 'subtitle') {
+    return !left.subtitleId || left.subtitleId === right.groupId;
+  }
+
+  if (left.type === 'subtitle' && right.type === 'video') {
+    return !right.subtitleId || right.subtitleId === left.groupId;
+  }
+
+  return false;
+};
+
+const createPairingMasks = (streams: MediaStreamInfo[]) => {
+  const masks = new Map<MediaStreamInfo, bigint>();
+  let nextPairIndex = 0;
+
+  for (const [leftIndex, left] of streams.entries()) {
+    for (const right of streams.slice(leftIndex + 1)) {
+      if (!canPairStreams(left, right)) continue;
+
+      const bit = 1n << BigInt(nextPairIndex++);
+      masks.set(left, (masks.get(left) ?? 0n) | bit);
+      masks.set(right, (masks.get(right) ?? 0n) | bit);
+    }
+  }
+
+  return masks;
+};
+
+type LoadedDashSession = {
+  extractor: DashExtractor;
+  manifestUrl: string;
+  streams: MediaStreamInfo[];
+  trackBackings: DashInputTrackBacking[];
+};
+
+class DashSession {
+  readonly source: Source;
+
+  #loadPromise?: Promise<LoadedDashSession>;
+  #disposed = false;
+
+  constructor(source: Source) {
+    this.source = source;
+  }
+
+  async load(): Promise<LoadedDashSession> {
+    if (this.#disposed) {
+      throw new Error('Input has been disposed.');
+    }
+
+    this.#loadPromise ??= (async () => {
+      const { text, url } = await loadManifestText(this.source);
+      const parserConfig = new ParserConfig();
+      parserConfig.headers = getSourceHeaders(this.source);
+      parserConfig.originalUrl = url;
+      parserConfig.url = url;
+
+      const extractor = new DashExtractor(parserConfig);
+      const streams = await extractor.extractStreams(text.trim());
+      await extractor.fetchPlayList(streams);
+
+      const typeNumbers = {
+        video: 1,
+        audio: 1,
+        subtitle: 1,
+      };
+      const pairingMasks = createPairingMasks(streams);
+      const trackBackings: DashInputTrackBacking[] = [];
+
+      for (const [index, stream] of streams.entries()) {
+        const number = typeNumbers[stream.type]++;
+        const pairingMask = pairingMasks.get(stream) ?? 0n;
+
+        if (stream.type === 'video') {
+          trackBackings.push(
+            new DashInputVideoTrackBacking(this, stream, index + 1, number, pairingMask),
+          );
+        } else if (stream.type === 'audio') {
+          trackBackings.push(
+            new DashInputAudioTrackBacking(this, stream, index + 1, number, pairingMask),
+          );
+        } else if (stream.type === 'subtitle') {
+          trackBackings.push(
+            new DashInputSubtitleTrackBacking(this, stream, index + 1, number, pairingMask),
+          );
+        }
+      }
+
+      return {
+        extractor,
+        manifestUrl: url,
+        streams,
+        trackBackings,
+      };
+    })();
+
+    return this.#loadPromise;
+  }
+
+  async refreshSegments(streamInfo: MediaStreamInfo): Promise<void> {
+    const { extractor, manifestUrl, streams } = await this.load();
+    if (!streamInfo.playlist?.isLive) return;
+    if (!manifestUrl.startsWith('http://') && !manifestUrl.startsWith('https://')) return;
+
+    await extractor.refreshPlayList(streams);
+  }
+
+  dispose() {
+    this.#disposed = true;
+  }
+}
+
+abstract class DashTrackBacking {
+  readonly session: DashSession;
+  readonly streamInfo: MediaStreamInfo;
 
   #segmentedInput?: DashSegmentedInput;
 
-  constructor(input: DashInput, streamInfo: MediaStreamInfo, id: number, number: number) {
-    this.input = input;
+  constructor(
+    session: DashSession,
+    streamInfo: MediaStreamInfo,
+    private readonly id: number,
+    private readonly number: number,
+    private readonly pairingMask: bigint,
+  ) {
+    this.session = session;
     this.streamInfo = streamInfo;
-    this.id = id;
-    this.number = number;
   }
 
-  async getCodec() {
-    return this.streamInfo.codec ?? null;
+  abstract getType(): 'video' | 'audio' | 'subtitle';
+
+  getId() {
+    return this.id;
   }
 
-  get codec() {
-    return this.streamInfo.codec ?? null;
+  getNumber() {
+    return this.number;
   }
 
-  async getCodecParameterString() {
-    return this.streamInfo.codecs;
+  getCodec(): MediaCodec | null {
+    return this.streamInfo.codec as MediaCodec | null;
   }
 
-  async getLanguageCode() {
+  getInternalCodecId() {
+    return null;
+  }
+
+  getName() {
+    return this.streamInfo.name ?? null;
+  }
+
+  getLanguageCode() {
     return this.streamInfo.languageCode ?? 'und';
   }
 
-  async getName() {
-    return this.streamInfo.name ?? null;
+  getTimeResolution() {
+    return 1;
   }
 
-  get name() {
-    return this.streamInfo.name ?? null;
+  isRelativeToUnixEpoch() {
+    return false;
   }
 
-  async getBitrate() {
+  getDisposition() {
+    return getDisposition(this.streamInfo);
+  }
+
+  getPairingMask() {
+    return this.pairingMask;
+  }
+
+  getBitrate() {
     return this.streamInfo.bitrate ?? null;
   }
 
-  async getAverageBitrate() {
+  getAverageBitrate() {
     return this.streamInfo.bitrate ?? null;
   }
 
@@ -327,89 +446,45 @@ abstract class DashInputTrackBase {
     return this.streamInfo.playlist?.totalDuration ?? null;
   }
 
-  async computeDuration() {
-    return this.streamInfo.playlist?.totalDuration ?? 0;
-  }
-
-  async getFirstTimestamp() {
-    return 0;
-  }
-
-  async hasOnlyKeyPackets() {
-    return false;
-  }
-
-  async canDecode() {
-    return true;
-  }
-
-  async isLive() {
-    return this.streamInfo.playlist?.isLive ?? false;
-  }
-
   async getLiveRefreshInterval() {
     if (!this.streamInfo.playlist?.isLive) return null;
     return this.streamInfo.playlist.refreshIntervalMs / 1000;
   }
 
-  async getDisposition(): Promise<TrackDisposition> {
-    const subtitleStreamInfo =
-      this.streamInfo.type === 'subtitle' ? (this.streamInfo as SubtitleStreamInfo) : undefined;
-    const audioStreamInfo =
-      this.streamInfo.type === 'audio' ? (this.streamInfo as AudioStreamInfo) : undefined;
-
-    return {
-      ...DEFAULT_DISPOSITION,
-      default: !!this.streamInfo.default,
-      commentary: this.streamInfo.role === ROLE_TYPE.Commentary,
-      hearingImpaired: !!subtitleStreamInfo?.sdh,
-      visuallyImpaired: !!audioStreamInfo?.descriptive,
-      forced: this.streamInfo.role === ROLE_TYPE.ForcedSubtitle || !!subtitleStreamInfo?.forced,
-    };
-  }
-
-  canBePairedWith(other: DashInputTrack): boolean {
-    if (
-      (this.input === other.input && this.id === other.id) ||
-      this.input !== other.input ||
-      this.streamInfo.type === other.streamInfo.type
-    ) {
-      return false;
-    }
-
-    if (this.streamInfo.type === 'video' && other.streamInfo.type === 'audio') {
-      return !this.streamInfo.audioId || this.streamInfo.audioId === other.streamInfo.groupId;
-    }
-
-    if (this.streamInfo.type === 'audio' && other.streamInfo.type === 'video') {
-      return !other.streamInfo.audioId || other.streamInfo.audioId === this.streamInfo.groupId;
-    }
-
-    if (this.streamInfo.type === 'video' && other.streamInfo.type === 'subtitle') {
-      return !this.streamInfo.subtitleId || this.streamInfo.subtitleId === other.streamInfo.groupId;
-    }
-
-    if (this.streamInfo.type === 'subtitle' && other.streamInfo.type === 'video') {
-      return (
-        !other.streamInfo.subtitleId || other.streamInfo.subtitleId === this.streamInfo.groupId
-      );
-    }
-
+  getHasOnlyKeyPackets() {
     return false;
   }
 
-  async hasPairableAudioTrack(predicate?: (track: DashInputAudioTrack) => MaybePromise<boolean>) {
-    const tracks = await this.input.getAudioTracks();
-    for (const track of tracks) {
-      if (this.canBePairedWith(track) && ((await predicate?.(track)) ?? true)) {
-        return true;
-      }
-    }
-    return false;
+  async getDecoderConfig() {
+    return null;
+  }
+
+  getMetadataCodecParameterString() {
+    return this.streamInfo.codecs;
+  }
+
+  async getFirstPacket() {
+    return null;
+  }
+
+  async getPacket() {
+    return null;
+  }
+
+  async getNextPacket(_packet: EncodedPacket) {
+    return null;
+  }
+
+  async getKeyPacket() {
+    return null;
+  }
+
+  async getNextKeyPacket(_packet: EncodedPacket) {
+    return null;
   }
 
   getSegmentedInput() {
-    this.#segmentedInput ??= new DashSegmentedInput(this as unknown as DashInputTrack);
+    this.#segmentedInput ??= new DashSegmentedInput(this);
     return this.#segmentedInput;
   }
 
@@ -424,215 +499,175 @@ abstract class DashInputTrackBase {
   }
 }
 
-export class DashInputVideoTrack extends DashInputTrackBase {
-  get type() {
+class DashInputVideoTrackBacking extends DashTrackBacking {
+  override streamInfo: VideoStreamInfo;
+
+  constructor(
+    session: DashSession,
+    streamInfo: VideoStreamInfo,
+    id: number,
+    number: number,
+    pairingMask: bigint,
+  ) {
+    super(session, streamInfo, id, number, pairingMask);
+    this.streamInfo = streamInfo;
+  }
+
+  getType() {
     return 'video' as const;
   }
 
-  isVideoTrack(): this is DashInputVideoTrack {
-    return true;
+  override getCodec(): VideoCodec | null {
+    return this.streamInfo.codec as VideoCodec | null;
   }
 
-  isAudioTrack(): this is DashInputAudioTrack {
+  getCodedWidth() {
+    return this.streamInfo.width ?? 0;
+  }
+
+  getCodedHeight() {
+    return this.streamInfo.height ?? 0;
+  }
+
+  getSquarePixelWidth() {
+    return this.streamInfo.width ?? 0;
+  }
+
+  getSquarePixelHeight() {
+    return this.streamInfo.height ?? 0;
+  }
+
+  getRotation() {
+    return 0;
+  }
+
+  async getColorSpace(): Promise<VideoColorSpaceInit> {
+    return {};
+  }
+
+  async canBeTransparent() {
     return false;
-  }
-
-  async getDisplayHeight() {
-    return (this.streamInfo as VideoStreamInfo).height ?? 0;
-  }
-
-  async getDisplayWidth() {
-    return (this.streamInfo as VideoStreamInfo).width ?? 0;
   }
 }
 
-export class DashInputAudioTrack extends DashInputTrackBase {
-  get type() {
+class DashInputAudioTrackBacking extends DashTrackBacking {
+  override streamInfo: AudioStreamInfo;
+
+  constructor(
+    session: DashSession,
+    streamInfo: AudioStreamInfo,
+    id: number,
+    number: number,
+    pairingMask: bigint,
+  ) {
+    super(session, streamInfo, id, number, pairingMask);
+    this.streamInfo = streamInfo;
+  }
+
+  getType() {
     return 'audio' as const;
   }
 
-  isVideoTrack(): this is DashInputVideoTrack {
-    return false;
+  override getCodec(): AudioCodec | null {
+    return this.streamInfo.codec as AudioCodec | null;
   }
 
-  isAudioTrack(): this is DashInputAudioTrack {
-    return true;
+  getNumberOfChannels() {
+    return this.streamInfo.numberOfChannels ?? 0;
   }
 
-  async getNumberOfChannels() {
-    return (this.streamInfo as AudioStreamInfo).numberOfChannels ?? 0;
+  getSampleRate() {
+    return this.streamInfo.sampleRate ?? 0;
   }
 }
 
-export class DashInputSubtitleTrack extends DashInputTrackBase {
-  get type() {
+class DashInputSubtitleTrackBacking extends DashTrackBacking {
+  override streamInfo: SubtitleStreamInfo;
+
+  constructor(
+    session: DashSession,
+    streamInfo: SubtitleStreamInfo,
+    id: number,
+    number: number,
+    pairingMask: bigint,
+  ) {
+    super(session, streamInfo, id, number, pairingMask);
+    this.streamInfo = streamInfo;
+  }
+
+  getType() {
     return 'subtitle' as const;
   }
-
-  isVideoTrack(): this is DashInputVideoTrack {
-    return false;
-  }
-
-  isAudioTrack(): this is DashInputAudioTrack {
-    return false;
-  }
 }
 
-export type DashInputTrack = DashInputVideoTrack | DashInputAudioTrack | DashInputSubtitleTrack;
+export type DashInputTrackBacking =
+  | DashInputVideoTrackBacking
+  | DashInputAudioTrackBacking
+  | DashInputSubtitleTrackBacking;
 
-export const isDashInputTrack = (track: unknown): track is DashInputTrack =>
-  track instanceof DashInputVideoTrack ||
-  track instanceof DashInputAudioTrack ||
-  track instanceof DashInputSubtitleTrack;
+class DashDemuxer {
+  input: MediabunnyInput;
 
-type LoadedDashInput = {
-  extractor: DashExtractor;
-  manifestUrl: string;
-  tracks: DashInputTrack[];
-};
+  #session: DashSession;
 
-export class DashInput {
-  readonly source: Source;
-
-  #loadPromise?: Promise<LoadedDashInput>;
-  #disposed = false;
-
-  constructor(source: Source) {
-    this.source = source;
+  constructor(input: MediabunnyInput) {
+    this.input = input;
+    this.#session = new DashSession(input.source);
   }
 
-  async #load(): Promise<LoadedDashInput> {
-    if (this.#disposed) {
-      throw new Error('Input has been disposed.');
-    }
-
-    this.#loadPromise ??= (async () => {
-      const manifestPath = getSourcePath(this.source);
-      if (!manifestPath) {
-        throw new Error('DASH input currently requires a pathed source such as UrlSource.');
-      }
-
-      const { text, url } = await loadManifestText(this.source);
-      const parserConfig = new ParserConfig();
-      parserConfig.headers = getSourceHeaders(this.source);
-      parserConfig.originalUrl = url;
-      parserConfig.url = url;
-
-      const extractor = new DashExtractor(parserConfig);
-      const streams = await extractor.extractStreams(text.trim());
-      await extractor.fetchPlayList(streams);
-
-      const tracks: DashInputTrack[] = [];
-      let nextId = 1;
-      const typeNumbers = {
-        video: 1,
-        audio: 1,
-        subtitle: 1,
-      };
-
-      for (const stream of streams) {
-        if (stream.type === 'video') {
-          tracks.push(new DashInputVideoTrack(this, stream, nextId++, typeNumbers.video++));
-        } else if (stream.type === 'audio') {
-          tracks.push(new DashInputAudioTrack(this, stream, nextId++, typeNumbers.audio++));
-        } else if (stream.type === 'subtitle') {
-          tracks.push(new DashInputSubtitleTrack(this, stream, nextId++, typeNumbers.subtitle++));
-        }
-      }
-
-      return {
-        extractor,
-        manifestUrl: url,
-        tracks,
-      };
-    })();
-
-    return this.#loadPromise;
+  async getTrackBackings() {
+    const { trackBackings } = await this.#session.load();
+    return trackBackings;
   }
 
-  async getFormat() {
-    return DASH;
+  async getMimeType() {
+    return DASH.mimeType;
   }
 
-  async canRead() {
-    await this.#load();
-    return true;
-  }
-
-  async getDurationFromMetadata(tracks?: DashInputTrack[]) {
-    const targetTracks = tracks ?? (await this.getTracks());
-    if (targetTracks.length === 0) return null;
-
-    return Math.max(...targetTracks.map((track) => track.streamInfo.playlist?.totalDuration ?? 0));
-  }
-
-  async getTracks(query?: InputTrackQuery<DashInputTrack>) {
-    const { tracks } = await this.#load();
-    return queryTracks(tracks, query);
-  }
-
-  async getVideoTracks(query?: InputTrackQuery<DashInputVideoTrack>) {
-    const tracks = (await this.getTracks()).filter((track) => track.isVideoTrack());
-    return queryTracks(tracks, query);
-  }
-
-  async getAudioTracks(query?: InputTrackQuery<DashInputAudioTrack>) {
-    const tracks = (await this.getTracks()).filter((track) => track.isAudioTrack());
-    return queryTracks(tracks, query);
-  }
-
-  async getPrimaryVideoTrack(query?: InputTrackQuery<DashInputVideoTrack>) {
-    const tracks = await this.getVideoTracks({
-      ...query,
-      sortBy: async (track) => {
-        const extra = query?.sortBy ? toQuerySortArray(await query.sortBy(track)) : [];
-        return [
-          prefer((await track.getDisposition()).default),
-          prefer(await track.hasPairableAudioTrack()),
-          prefer(!(await track.hasOnlyKeyPackets())),
-          desc(await track.getBitrate()),
-          ...extra,
-        ];
-      },
-    });
-
-    return tracks[0] ?? null;
-  }
-
-  async getPrimaryAudioTrack(query?: InputTrackQuery<DashInputAudioTrack>) {
-    const primaryVideoTrack = await this.getPrimaryVideoTrack();
-    const tracks = await this.getAudioTracks({
-      ...query,
-      sortBy: async (track) => {
-        const extra = query?.sortBy ? toQuerySortArray(await query.sortBy(track)) : [];
-        return [
-          prefer(!primaryVideoTrack || track.canBePairedWith(primaryVideoTrack)),
-          prefer((await track.getDisposition()).default),
-          desc(await track.getBitrate()),
-          ...extra,
-        ];
-      },
-    });
-
-    return tracks[0] ?? null;
-  }
-
-  async refreshSegments(track: DashInputTrack): Promise<void> {
-    const { extractor, manifestUrl, tracks } = await this.#load();
-    if (!track.streamInfo.playlist?.isLive) return;
-    if (!manifestUrl.startsWith('http://') && !manifestUrl.startsWith('https://')) return;
-
-    await extractor.refreshPlayList(tracks.map((item) => item.streamInfo));
+  async getMetadataTags(): Promise<MetadataTags> {
+    return {};
   }
 
   dispose() {
-    this.#disposed = true;
+    this.#session.dispose();
   }
 }
 
-export class DashInputFormat {
-  readonly name = 'dash';
+export class DashInputFormat extends InputFormat {
+  get name() {
+    return 'dash';
+  }
+
+  get mimeType() {
+    return 'application/dash+xml';
+  }
+
+  async _canReadInput(input: MediabunnyInput) {
+    if (isLikelyDashPath(input.source)) return true;
+
+    try {
+      const { text } = await loadManifestText(input.source);
+      return isDashManifestText(text);
+    } catch {
+      return false;
+    }
+  }
+
+  _createDemuxer(input: MediabunnyInput) {
+    return new DashDemuxer(input);
+  }
 }
 
+export type DashInputSubtitleTrack = {
+  readonly type: 'subtitle';
+  getCodec(): Promise<MediaCodec | null>;
+  getCodecParameterString(): Promise<string | null>;
+  getSegmentedInput(): DashSegmentedInput;
+  getSegments(): Promise<DashSegment[]>;
+  isVideoTrack(): false;
+  isAudioTrack(): false;
+  determinePacketType(packet: EncodedPacket): Promise<PacketType | null>;
+};
+
 export const DASH = new DashInputFormat();
-export const DASH_FORMATS = [DASH] as const;
+export const DASH_FORMATS: InputFormat[] = [DASH];
