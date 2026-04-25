@@ -14,12 +14,9 @@ importers:
       barsic:
         specifier: ^0.2.0
         version: 0.2.0
-      ky:
-        specifier: ^2.0.2
-        version: 2.0.2
       mediabunny:
-        specifier: 1.42.0-beta.6
-        version: 1.42.0-beta.6
+        specifier: 1.42.0-beta.7
+        version: 1.42.0-beta.7
       temporal-polyfill:
         specifier: ^0.3.2
         version: 0.3.2
@@ -668,10 +665,6 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  ky@2.0.2:
-    resolution: {integrity: sha512-/GmXpo9F9W+f8n4Ivr2iH+7h7wL7jLbLKWkMlpflcCRb6kGjBfTlASEXaZ9qUgNTn4VgS0P2pwxxzQ4EM6Ulgg==}
-    engines: {node: '>=22'}
-
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
     engines: {node: '>= 12.0.0'}
@@ -745,8 +738,8 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  mediabunny@1.42.0-beta.6:
-    resolution: {integrity: sha512-6eKRANnLRy0CO9e6UQwT25KeafCvSFuahwRpkqfdnBHb4aecrSzoK4wv3ZnOe+0RBx4gQ72lGYj/Uwk1e4fXHA==}
+  mediabunny@1.42.0-beta.7:
+    resolution: {integrity: sha512-6M28bbDNCIf5YBPgIhyp+Tducu4pgfmR0ClUNpQuXxw/mZFG0/9tLlcXM4XcxYvh4Iv+2sYBOSsHMVcGB2ojKQ==}
 
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
@@ -1420,8 +1413,6 @@ snapshots:
 
   jsesc@3.1.0: {}
 
-  ky@2.0.2: {}
-
   lightningcss-android-arm64@1.32.0:
     optional: true
 
@@ -1475,7 +1466,7 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  mediabunny@1.42.0-beta.6:
+  mediabunny@1.42.0-beta.7:
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.11
       '@types/dom-webcodecs': 0.1.13

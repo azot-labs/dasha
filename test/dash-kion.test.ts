@@ -1,13 +1,17 @@
 import { expect, test } from 'vitest';
-import { StreamExtractor } from '../lib/stream-extractor';
-import { load } from './utils';
+import { DASH_FORMATS } from '../dasha';
+import { createAssetInput } from './utils';
 
-test('parse kion mpd from text', async () => {
-  const { text } = await load('dash-kion.mpd');
+test('parse kion mpd through the Input API', async () => {
+  using input = createAssetInput('dash-kion.mpd', DASH_FORMATS);
 
-  const streamExtractor = new StreamExtractor();
-  await streamExtractor.loadSourceFromText(text);
-  const streams = await streamExtractor.extractStreams();
+  const tracks = await input.getTracks();
+  expect(tracks).toHaveLength(5);
 
-  expect(streams.length).toBe(5);
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  const primaryAudioTrack = await input.getPrimaryAudioTrack();
+  expect(primaryVideoTrack).not.toBeNull();
+  expect(primaryAudioTrack).not.toBeNull();
+  expect(primaryVideoTrack?.canBePairedWith(primaryAudioTrack!)).toBe(true);
+  expect(await primaryVideoTrack?.getDurationFromMetadata()).toBe(7450);
 });

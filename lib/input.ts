@@ -1,17 +1,45 @@
-import { desc, asc, HLS_FORMATS, Input, UrlSource, InputTrack } from 'mediabunny';
+import { FilePathSource, UrlSource, HLS_FORMATS, desc, asc, prefer } from 'mediabunny';
+import type { InputFormat, InputOptions as MediabunnyInputOptions, Source } from 'mediabunny';
 import type { HlsSegmentedInput, HlsSegment, InputTrackWithBacking } from './mediabunny';
+import { DASH, DASH_FORMATS } from './dash';
+import type { DashSegment, DashSegmentedInput } from './dash';
+import {
+  SegmentedMediabunnyInput,
+  type MediabunnyAudioTrackWithSegments,
+  type MediabunnyTrackWithSegments,
+  type MediabunnyVideoTrackWithSegments,
+} from './mediabunny-input';
 
-export const getSegmentedInput = (track: InputTrack): HlsSegmentedInput => {
-  const backing = (track as InputTrackWithBacking)._backing;
-  const internalTrack = backing.internalTrack;
-  return internalTrack.demuxer.getSegmentedInputForPath(internalTrack.fullPath);
+type DashaInputOptions<S extends Source = Source> = Omit<MediabunnyInputOptions<S>, 'formats'> & {
+  formats: readonly InputFormat[];
 };
 
-export const getSegments = async (track: InputTrack): Promise<HlsSegment[]> => {
-  const segmentedInput: HlsSegmentedInput = getSegmentedInput(track);
-  await segmentedInput.runUpdateSegments();
-  return segmentedInput.segments;
-};
+export type InputSegment = HlsSegment | DashSegment;
+export type InputSegmentedInput = HlsSegmentedInput | DashSegmentedInput;
+export type InputTrack = MediabunnyTrackWithSegments;
+export type InputVideoTrack = MediabunnyVideoTrackWithSegments;
+export type InputAudioTrack = MediabunnyAudioTrackWithSegments;
 
-export { InputTrack, Input, UrlSource, HLS_FORMATS, desc, asc };
-export type { HlsSegment, HlsSegmentedInput, InputTrackWithBacking };
+export class Input<S extends Source = Source> extends SegmentedMediabunnyInput<S> {
+  constructor(options: DashaInputOptions<S>) {
+    super(options as MediabunnyInputOptions<S>);
+  }
+}
+
+export const isInput = (value: unknown): value is Input => value instanceof Input;
+
+export const getSegmentedInput = (track: InputTrack): InputSegmentedInput =>
+  track.getSegmentedInput();
+
+export const getSegments = async (track: InputTrack): Promise<InputSegment[]> =>
+  track.getSegments();
+
+export { FilePathSource, UrlSource, HLS_FORMATS, DASH, DASH_FORMATS, desc, asc, prefer };
+export type {
+  HlsSegment,
+  HlsSegmentedInput,
+  DashSegment,
+  DashSegmentedInput,
+  InputTrackWithBacking,
+};
+export type { InputTrackQuery } from 'mediabunny';

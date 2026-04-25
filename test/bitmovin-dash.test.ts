@@ -1,20 +1,17 @@
 import { expect, test } from 'vitest';
-import { StreamExtractor } from '../lib/stream-extractor';
-import { load } from './utils';
+import { DASH_FORMATS } from '../dasha';
+import { createAssetInput } from './utils';
 
-test('parse bitmovin mpd from text', async () => {
-  const url = 'https://cdn.bitmovin.com/content/assets/art-of-motion_drm/mpds/11331.mpd';
-  const { text } = await load('bitmovin.mpd');
+test('parse bitmovin mpd with drm through the Input API', async () => {
+  using input = createAssetInput('bitmovin.mpd', DASH_FORMATS);
 
-  const streamExtractor = new StreamExtractor();
-  await streamExtractor.loadSourceFromText(text, url);
-  const streams = await streamExtractor.extractStreams();
+  const tracks = await input.getTracks();
+  expect(tracks).toHaveLength(7);
 
-  expect(streams.length).toBe(7);
-
-  const firstAudioTrack = streams.find((stream) => stream.type === 'audio');
-  //   strictEqual(
-  //     firstAudioTrack.protection.widevine.pssh,
-  //     'AAAAW3Bzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAADsIARIQ62dqu8s0Xpa7z2FmMPGj2hoNd2lkZXZpbmVfdGVzdCIQZmtqM2xqYVNkZmFsa3IzaioCSEQyAA==',
-  //   );
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  const firstSegment = (await primaryVideoTrack!.getSegments())[0];
+  expect(firstSegment?.encryption?.method).toBe('cenc');
+  expect(firstSegment?.encryption?.drm.widevine?.pssh).toBe(
+    'AAAAW3Bzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAADsIARIQ62dqu8s0Xpa7z2FmMPGj2hoNd2lkZXZpbmVfdGVzdCIQZmtqM2xqYVNkZmFsa3IzaioCSEQyAA==',
+  );
 });

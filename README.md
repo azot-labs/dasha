@@ -4,7 +4,7 @@
 [![npm downloads/month](https://img.shields.io/npm/dm/dasha?style=flat&color=black)](https://www.npmjs.com/package/dasha)
 [![npm downloads](https://img.shields.io/npm/dt/dasha?style=flat&color=black)](https://www.npmjs.com/package/dasha)
 
-Library for parsing MPEG-DASH (.mpd) and HLS (.m3u8) manifests. Made with the purpose of obtaining a simplified representation convenient for further downloading of segments.
+Library for working with MPEG-DASH (`.mpd`) and HLS (`.m3u8`) manifests through a mediabunny-compatible `Input` API. Made with the purpose of obtaining a simplified representation convenient for further downloading of segments by URLs.
 
 > [!WARNING]  
 > This README is for the alpha version. Info about latest stable version is available on [NPM](https://www.npmjs.com/package/dasha/v/3.1.5) or [another GitHub branch](https://github.com/azot-labs/dasha/tree/v3).
@@ -18,30 +18,11 @@ npm install dasha@alpha
 
 ## Usage
 
-```js
-import fs from 'node:fs/promises';
-import { StreamExtractor } from 'dasha';
-
-const url = 'https://dash.akamaized.net/dash264/TestCases/1a/sony/SNE_DASH_SD_CASE1A_REVISED.mpd';
-const streamExtractor = new StreamExtractor();
-await streamExtractor.loadSourceFromUrl(url);
-const streams = await streamExtractor.extractStreams();
-
-for (const stream of streams) {
-  const segments = stream.playlist?.mediaParts[0].mediaSegments || [];
-  const filename = `${stream.name}_${stream.groupId}`;
-  for (const segment of segments) {
-    const content = await fetch(segment.url).then((res) => res.arrayBuffer());
-    await fs.appendFile(`${filename}.${stream.extension}`, content);
-  }
-}
-```
-
-### New API (HLS-only for now)
+### HLS
 
 ```ts
 import fs from 'node:fs/promises';
-import { getSegments, desc, HLS_FORMATS, Input, UrlSource } from 'dasha';
+import { desc, HLS_FORMATS, Input, UrlSource } from 'dasha';
 
 async function saveVideo() {
   const input = new Input({
@@ -64,7 +45,7 @@ async function saveVideo() {
 
   const bestVideoTrack = videoTracks[0];
 
-  const segments = await getSegments(bestVideoTrack);
+  const segments = await bestVideoTrack.getSegments();
 
   const outputPath = 'output.mp4';
   const urls = segments.map((segment) => segment.location.path);
@@ -75,6 +56,41 @@ async function saveVideo() {
     await fs.appendFile(outputPath, new Uint8Array(content));
   }
 };
+```
+
+### DASH
+
+```ts
+import fs from 'node:fs/promises';
+import { DASH_FORMATS, Input, UrlSource, desc } from 'dasha';
+
+async function saveDashVideo() {
+  const input = new Input({
+    source: new UrlSource(
+      'https://dash.akamaized.net/dash264/TestCases/1a/netflix/exMPD_BIP_TC1.mpd',
+    ),
+    formats: DASH_FORMATS,
+  });
+
+  const videoTracks = await input.getVideoTracks({
+    sortBy: async (track) => [
+      desc(await track.getDisplayHeight()),
+      desc(await track.getBitrate()),
+    ],
+  });
+
+  const bestVideoTrack = videoTracks[0];
+  const segments = await bestVideoTrack.getSegments();
+
+  const outputPath = 'output.m4s';
+  const urls = segments.map((segment) => segment.location.path);
+  const initSegment = segments[0]?.initSegment;
+  if (initSegment) urls.unshift(initSegment.location.path);
+  for (const url of urls) {
+    const content = await fetch(url).then((res) => res.arrayBuffer());
+    await fs.appendFile(outputPath, new Uint8Array(content));
+  }
+}
 ```
 
 ## Credits
