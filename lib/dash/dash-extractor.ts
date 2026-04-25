@@ -1,15 +1,10 @@
 import { Temporal } from 'temporal-polyfill';
-import { DOMParser, Element, LiveNodeList } from '@xmldom/xmldom';
+import { DOMParser } from '@xmldom/xmldom';
 import fetch from 'ky';
 import { EXTRACTOR_TYPES, ExtractorType } from '../shared/extractor-type';
 import { ParserConfig } from '../parser-config';
 import { ENCRYPT_METHODS, EncryptMethod } from '../shared/encrypt-method';
-import {
-  AudioStreamInfo,
-  MediaStreamInfo,
-  SubtitleStreamInfo,
-  VideoStreamInfo,
-} from '../shared/stream-info';
+import { MediaStreamInfo } from '../shared/stream-info';
 import { Extractor } from '../extractor';
 import { combineUrl, replaceVars } from '../shared/util';
 import { Playlist } from '../shared/playlist';
@@ -19,65 +14,20 @@ import { MediaSegment } from '../shared/media-segment';
 import { DASH_TAGS } from './dash-tags';
 import { EncryptInfo } from '../shared/encrypt-info';
 import { parseRange } from './dash-utils';
-import { parseDynamicRange, tryParseVideoCodec } from '../shared/video';
-import { checkIsClosedCaption, checkIsSdh, tryParseSubtitleCodec } from '../shared/subtitle';
+import { parseDynamicRange } from '../shared/video';
+import { checkIsClosedCaption, checkIsSdh } from '../shared/subtitle';
 import {
   checkIsDescriptive,
   getDolbyDigitalPlusComplexityIndex,
   parseChannels,
-  tryParseAudioCodec,
 } from '../shared/audio';
-import { pipe } from '../shared/pipe';
-
-const createMediaStreamInfo = (params: {
-  codecs: string | null;
-  contentType: string | null;
-  mimeType: string | null;
-}): MediaStreamInfo => {
-  const shouldUseCodecsFromMime =
-    params.contentType === 'text' && !params.mimeType?.includes('mp4');
-  const codecs = shouldUseCodecsFromMime ? params.mimeType?.split('/')[1] : params.codecs;
-  if (!params.codecs && codecs) params.codecs = codecs;
-
-  if (params.codecs) {
-    const videoCodec = tryParseVideoCodec(params.codecs);
-    if (videoCodec) return new VideoStreamInfo({ codec: videoCodec });
-    const audioCodec = tryParseAudioCodec(params.codecs);
-    if (audioCodec) return new AudioStreamInfo({ codec: audioCodec });
-    const subtitleCodec = tryParseSubtitleCodec(params.codecs);
-    if (subtitleCodec) return new SubtitleStreamInfo({ codec: subtitleCodec });
-  } else {
-    const type = params.contentType || params.mimeType?.split('/')[0];
-    if (type === 'video') return new VideoStreamInfo();
-    if (type === 'audio') return new AudioStreamInfo();
-    if (type === 'text') return new SubtitleStreamInfo();
-  }
-
-  throw new Error('Unable to determine the type of a track, cannot continue...');
-};
-
-const selectNonEmpty = (args: { tag: string; elements: Element[] }) => {
-  for (const element of args.elements) {
-    const results = element.getElementsByTagName(args.tag);
-    if (results.length) return results;
-  }
-};
-
-const toSchemeValueArray = (elements?: LiveNodeList<Element>) => {
-  const results: { schemeIdUri: string; value?: string }[] = [];
-  if (!elements) return results;
-  for (const element of elements) {
-    const schemeIdUri = element.getAttribute('schemeIdUri')!;
-    const value = element.getAttribute('value')!;
-    results.push({ schemeIdUri, value });
-  }
-  return results;
-};
-
-const getTagAttrs = (tag: string, ...elements: Element[]) => {
-  const adapter = pipe(selectNonEmpty, toSchemeValueArray);
-  return adapter({ tag, elements });
-};
+import {
+  createDashStreamInfo,
+  extendDashBaseUrl,
+  filterDashLanguage,
+  getDashFrameRate,
+  getDashTagAttrs,
+} from './dash-misc';
 
 export class DashExtractor implements Extractor {
   static #DEFAULT_METHOD: EncryptMethod = ENCRYPT_METHODS.CENC;
@@ -99,22 +49,6 @@ export class DashExtractor implements Extractor {
   #setInitUrl() {
     this.#mpdUrl = this.#parserConfig.url ?? '';
     this.#baseUrl = this.#parserConfig.baseUrl ?? this.#mpdUrl;
-  }
-
-  #extendBaseUrl(node: Element, baseUrl: string) {
-    const targets = node
-      .getElementsByTagName('BaseURL')
-      .filter((n) => !!n.parentNode?.isSameNode(node));
-    const target = targets[0];
-    if (target?.textContent) return combineUrl(baseUrl, target.textContent);
-    return baseUrl;
-  }
-
-  #getFrameRate(node: Element): number | undefined {
-    const frameRate = node.getAttribute('frameRate');
-    if (!frameRate || !frameRate.includes('/')) return;
-    const d = Number(frameRate.split('/')[0]) / Number(frameRate.split('/')[1]);
-    return Number(d.toFixed(3));
   }
 
   async extractStreams(rawText: string): Promise<MediaStreamInfo[]> {
@@ -150,18 +84,18 @@ export class DashExtractor implements Extractor {
       const periodDurationSeconds = Temporal.Duration.from(
         periodDuration || mediaPresentationDuration || 'PT0S',
       ).total('seconds');
-      let segBaseUrl = this.#extendBaseUrl(period, this.#baseUrl);
+      let segBaseUrl = extendDashBaseUrl(period, this.#baseUrl);
       const adaptationSetsBaseUrl = segBaseUrl;
       const adaptationSets = period.getElementsByTagName('AdaptationSet');
       for (const adaptationSet of adaptationSets) {
-        segBaseUrl = this.#extendBaseUrl(adaptationSet, segBaseUrl);
+        segBaseUrl = extendDashBaseUrl(adaptationSet, segBaseUrl);
         const representationsBaseUrl = segBaseUrl;
         let contentType = adaptationSet.getAttribute('contentType');
         let mimeType = adaptationSet.getAttribute('mimeType');
-        const frameRate = this.#getFrameRate(adaptationSet);
+        const frameRate = getDashFrameRate(adaptationSet);
         const representations = adaptationSet.getElementsByTagName('Representation');
         for (const representation of representations) {
-          segBaseUrl = this.#extendBaseUrl(representation, segBaseUrl);
+          segBaseUrl = extendDashBaseUrl(representation, segBaseUrl);
 
           if (!contentType) {
             contentType = representation.getAttribute('contentType');
@@ -171,30 +105,34 @@ export class DashExtractor implements Extractor {
           }
 
           const codecs =
-            representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs')!;
+            representation.getAttribute('codecs') || adaptationSet.getAttribute('codecs');
           const widthParameterString = representation.getAttribute('width');
           const heightParameterString = representation.getAttribute('height');
 
-          const roles = getTagAttrs('Role', representation, adaptationSet);
-          const supplementalProps = getTagAttrs(
+          const roles = getDashTagAttrs('Role', representation, adaptationSet);
+          const supplementalProps = getDashTagAttrs(
             'SupplementalProperty',
             representation,
             adaptationSet,
           );
-          const essentialProps = getTagAttrs('EssentialProperty', representation, adaptationSet);
-          const accessibilities = getTagAttrs('Accessibility', representation, adaptationSet);
-          const audioChannelConfigs = getTagAttrs(
+          const essentialProps = getDashTagAttrs(
+            'EssentialProperty',
+            representation,
+            adaptationSet,
+          );
+          const accessibilities = getDashTagAttrs('Accessibility', representation, adaptationSet);
+          const audioChannelConfigs = getDashTagAttrs(
             'AudioChannelConfiguration',
             adaptationSet,
             representation,
           );
           const channelsString = audioChannelConfigs[0]?.value;
 
-          const streamInfo = createMediaStreamInfo({ codecs, contentType, mimeType });
+          const streamInfo = createDashStreamInfo({ codecs, contentType, mimeType });
 
           const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
 
-          streamInfo.languageCode = this.#filterLanguage(
+          streamInfo.languageCode = filterDashLanguage(
             representation.getAttribute('lang') || adaptationSet.getAttribute('lang'),
           );
 
@@ -202,8 +140,8 @@ export class DashExtractor implements Extractor {
             streamInfo.bitrate = bitrate;
             streamInfo.width = Number(widthParameterString);
             streamInfo.height = Number(heightParameterString);
-            streamInfo.frameRate = frameRate || this.#getFrameRate(representation);
-            if (supplementalProps && essentialProps) {
+            streamInfo.frameRate = frameRate || getDashFrameRate(representation);
+            if (codecs && supplementalProps && essentialProps) {
               streamInfo.dynamicRange = parseDynamicRange(
                 codecs,
                 supplementalProps,
@@ -254,10 +192,10 @@ export class DashExtractor implements Extractor {
           }
 
           const role = roles?.[0];
-          if (role) {
+          if (role?.value) {
             const roleValue = role.value;
             const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
-            const roleTypeKey = roleValue!.split('-').map(capitalize).join('');
+            const roleTypeKey = roleValue.split('-').map(capitalize).join('');
             const roleType = ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
             streamInfo.role = roleType;
             // if (roleType === ROLE_TYPE.Subtitle) {
@@ -311,25 +249,29 @@ export class DashExtractor implements Extractor {
             const durationStr = segmentList.getAttribute('duration');
             const initialization = segmentList.getElementsByTagName('Initialization')[0];
             if (initialization) {
-              const sourceUrl = initialization.getAttribute('sourceURL')!;
-              const initUrl = combineUrl(segBaseUrl, sourceUrl);
-              const initRange = initialization.getAttribute('range');
-              const initSegment = new MediaSegment();
-              initSegment.index = -1;
-              initSegment.url = initUrl;
-              if (initRange) {
-                const [start, expect] = parseRange(initRange);
-                initSegment.startRange = start;
-                initSegment.expectLength = expect;
+              const sourceUrl = initialization.getAttribute('sourceURL');
+              if (sourceUrl) {
+                const initUrl = combineUrl(segBaseUrl, sourceUrl);
+                const initRange = initialization.getAttribute('range');
+                const initSegment = new MediaSegment();
+                initSegment.index = -1;
+                initSegment.url = initUrl;
+                if (initRange) {
+                  const [start, expect] = parseRange(initRange);
+                  initSegment.startRange = start;
+                  initSegment.expectLength = expect;
+                }
+                streamInfo.playlist.mediaInit = initSegment;
               }
-              streamInfo.playlist.mediaInit = initSegment;
             }
 
             const segmentUrls = segmentList.getElementsByTagName('SegmentURL');
             const timescaleStr = segmentList.getAttribute('timescale') || '1';
             for (let segmentIndex = 0; segmentIndex < segmentUrls.length; segmentIndex++) {
               const segmentUrl = segmentUrls[segmentIndex];
-              const mediaUrl = combineUrl(segBaseUrl, segmentUrl.getAttribute('media')!);
+              const media = segmentUrl.getAttribute('media');
+              if (!media) continue;
+              const mediaUrl = combineUrl(segBaseUrl, media);
               const mediaRange = segmentUrl.getAttribute('mediaRange');
               const timescale = Number(timescaleStr);
               const duration = Number(durationStr);
@@ -353,9 +295,9 @@ export class DashExtractor implements Extractor {
             const segmentTemplate = segmentTemplateElements[0] || segmentTemplateElementsOuter[0];
             const segmentTemplateOuter =
               segmentTemplateElementsOuter[0] || segmentTemplateElements[0];
-            const varDic: Record<string, any> = {};
-            varDic[DASH_TAGS.TemplateRepresentationID] = streamInfo.groupId;
-            varDic[DASH_TAGS.TemplateBandwidth] = bitrate;
+            const varDic: Record<string, string> = {};
+            varDic[DASH_TAGS.TemplateRepresentationID] = streamInfo.groupId ?? '';
+            varDic[DASH_TAGS.TemplateBandwidth] = String(bitrate);
             const presentationTimeOffsetStr =
               segmentTemplate.getAttribute('presentationTimeOffset') ||
               segmentTemplateOuter.getAttribute('presentationTimeOffset') ||
@@ -385,7 +327,10 @@ export class DashExtractor implements Extractor {
             const mediaTemplate =
               segmentTemplate.getAttribute('media') || segmentTemplateOuter.getAttribute('media');
             const segmentTimeline = segmentTemplate.getElementsByTagName('SegmentTimeline')[0];
-            if (segmentTimeline) {
+            if (!mediaTemplate) {
+              // SegmentTemplate can legally provide only initialization data; fallback handling below
+              // will create a whole-resource segment when no media segments were emitted.
+            } else if (segmentTimeline) {
               const Ss = segmentTimeline.getElementsByTagName('S');
               let segNumber = Number(startNumberStr);
               let currentTime = 0;
@@ -398,10 +343,10 @@ export class DashExtractor implements Extractor {
                 const _duration = Number(_durationStr);
                 const timescale = Number(timescaleStr);
                 let _repeatCount = Number(_repeatCountStr);
-                varDic[DASH_TAGS.TemplateTime] = currentTime;
-                varDic[DASH_TAGS.TemplateNumber] = segNumber++;
-                const hasTime = mediaTemplate?.includes(DASH_TAGS.TemplateTime);
-                const media = replaceVars(mediaTemplate!, varDic);
+                varDic[DASH_TAGS.TemplateTime] = String(currentTime);
+                varDic[DASH_TAGS.TemplateNumber] = String(segNumber++);
+                const hasTime = mediaTemplate.includes(DASH_TAGS.TemplateTime);
+                const media = replaceVars(mediaTemplate, varDic);
                 const mediaUrl = combineUrl(segBaseUrl, media);
                 const mediaSegment = new MediaSegment();
                 mediaSegment.url = mediaUrl;
@@ -417,10 +362,10 @@ export class DashExtractor implements Extractor {
                 for (let i = 0; i < _repeatCount; i++) {
                   currentTime += _duration;
                   const _mediaSegment = new MediaSegment();
-                  varDic[DASH_TAGS.TemplateTime] = currentTime;
-                  varDic[DASH_TAGS.TemplateNumber] = segNumber++;
-                  const _hashTime = mediaTemplate?.includes(DASH_TAGS.TemplateTime);
-                  const _media = replaceVars(mediaTemplate!, varDic);
+                  varDic[DASH_TAGS.TemplateTime] = String(currentTime);
+                  varDic[DASH_TAGS.TemplateNumber] = String(segNumber++);
+                  const _hashTime = mediaTemplate.includes(DASH_TAGS.TemplateTime);
+                  const _media = replaceVars(mediaTemplate, varDic);
                   const _mediaUrl = combineUrl(segBaseUrl, _media);
                   _mediaSegment.url = _mediaUrl;
                   _mediaSegment.index = segIndex++;
@@ -438,8 +383,11 @@ export class DashExtractor implements Extractor {
               const duration = Number(durationStr);
               let totalNumber = Math.ceil((periodDurationSeconds * timescale) / duration);
               if (totalNumber === 0 && isLive) {
+                if (!availabilityStartTime) {
+                  throw new Error('Invalid live MPD: availabilityStartTime is required.');
+                }
                 const now = Date.now();
-                const availableTime = new Date(availabilityStartTime!);
+                const availableTime = new Date(availabilityStartTime);
                 const offsetMs = Number(presentationTimeOffsetStr) / 1000;
                 availableTime.setUTCMilliseconds(availableTime.getUTCMilliseconds() + offsetMs);
                 const ts = (now - availableTime.getTime()) / 1000;
@@ -453,10 +401,10 @@ export class DashExtractor implements Extractor {
                 index < startNumber + totalNumber;
                 index++, segIndex++
               ) {
-                varDic[DASH_TAGS.TemplateNumber] = index;
-                const hasNumber = mediaTemplate!.includes(DASH_TAGS.TemplateNumber);
-                const media = replaceVars(mediaTemplate!, varDic);
-                const mediaUrl = combineUrl(segBaseUrl, media!);
+                varDic[DASH_TAGS.TemplateNumber] = String(index);
+                const hasNumber = mediaTemplate.includes(DASH_TAGS.TemplateNumber);
+                const media = replaceVars(mediaTemplate, varDic);
+                const mediaUrl = combineUrl(segBaseUrl, media);
                 const mediaSegment = new MediaSegment();
                 mediaSegment.url = mediaUrl;
                 if (hasNumber) mediaSegment.nameFromVar = index.toString();
@@ -524,26 +472,29 @@ export class DashExtractor implements Extractor {
           if (_index > -1) {
             if (isLive) {
             } else {
-              const url1 = streamInfos[_index]
-                .playlist!.mediaParts.at(-1)!
-                .mediaSegments.at(-1)!.url;
+              const existingPlaylist = streamInfos[_index].playlist;
+              const lastPart = existingPlaylist?.mediaParts.at(-1);
+              const lastSegment = lastPart?.mediaSegments.at(-1);
+              if (!existingPlaylist || !lastPart || !lastSegment) {
+                continue;
+              }
+
+              const url1 = lastSegment.url;
               const url2 = streamInfo.playlist.mediaParts[0].mediaSegments.at(-1)?.url;
               if (url1 !== url2) {
-                const startIndex =
-                  streamInfos[_index].playlist!.mediaParts.at(-1)!.mediaSegments.at(-1)!.index + 1;
+                const startIndex = lastSegment.index + 1;
                 const segments = streamInfo.playlist.mediaParts[0].mediaSegments;
                 for (const segment of segments) {
                   segment.index += startIndex;
                 }
                 const mediaPart = new MediaPart();
-                mediaPart.mediaSegments = streamInfos[_index].playlist!.mediaParts[0].mediaSegments;
-                streamInfos[_index].playlist!.mediaParts.push(mediaPart);
+                mediaPart.mediaSegments = streamInfo.playlist.mediaParts[0].mediaSegments;
+                existingPlaylist.mediaParts.push(mediaPart);
               } else {
-                streamInfos[_index].playlist!.mediaParts.at(-1)!.mediaSegments.at(-1)!.duration +=
-                  streamInfo.playlist.mediaParts[0].mediaSegments.reduce(
-                    (sum, segment) => sum + segment.duration,
-                    0,
-                  );
+                lastSegment.duration += streamInfo.playlist.mediaParts[0].mediaSegments.reduce(
+                  (sum, segment) => sum + segment.duration,
+                  0,
+                );
               }
             }
           } else {
@@ -587,13 +538,6 @@ export class DashExtractor implements Extractor {
     return streamInfos;
   }
 
-  #filterLanguage(v?: string | null): string | undefined {
-    if (!v) return;
-    // const langCodeRegex = new RegExp('^[\w_\-\d]+$');
-    // return langCodeRegex.test(v) ? v : 'und';
-    return v;
-  }
-
   async refreshPlayList(streamInfos: MediaStreamInfo[]): Promise<void> {
     if (!streamInfos.length) return;
 
@@ -615,7 +559,10 @@ export class DashExtractor implements Extractor {
         );
       }
       if (results.length) {
-        streamInfo.playlist!.mediaParts = results.at(0)!.playlist!.mediaParts;
+        const resultPlaylist = results[0]?.playlist;
+        if (streamInfo.playlist && resultPlaylist) {
+          streamInfo.playlist.mediaParts = resultPlaylist.mediaParts;
+        }
       }
     }
 

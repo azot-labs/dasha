@@ -1,13 +1,16 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { InputFormat } from 'mediabunny';
 import { expect, test } from 'vitest';
 import { DASH, DASH_FORMATS, Input, UrlSource, desc, isInput } from '../dasha';
 
 test('parse dash with the mediabunny-like input API', async () => {
+  expect(DASH).toBeInstanceOf(InputFormat);
+
   const manifestPath = path.resolve('test/fixtures/sample.mpd');
   const manifestUrl = pathToFileURL(manifestPath).toString();
 
-  const input = new Input({
+  using input = new Input({
     source: new UrlSource(manifestUrl),
     formats: DASH_FORMATS,
   });
@@ -17,10 +20,7 @@ test('parse dash with the mediabunny-like input API', async () => {
   expect(await input.getFormat()).toBe(DASH);
 
   const videoTracks = await input.getVideoTracks({
-    sortBy: async (track) => [
-      desc(await track.getDisplayHeight()),
-      desc(await track.getBitrate()),
-    ],
+    sortBy: async (track) => [desc(await track.getDisplayHeight()), desc(await track.getBitrate())],
   });
 
   const bestVideoTrack = videoTracks[0];
