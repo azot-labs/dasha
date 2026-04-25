@@ -169,6 +169,13 @@ const loadManifestText = async (source: Source) => {
     const response = await fetch(manifestPath, {
       headers: getSourceHeaders(source),
     });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch DASH manifest: ${response.status} ${response.statusText} (${response.url})`,
+      );
+    }
+
     const text = await response.text();
     return {
       text,
@@ -404,6 +411,12 @@ abstract class DashInputTrackBase {
   getSegmentedInput() {
     this.#segmentedInput ??= new DashSegmentedInput(this as unknown as DashInputTrack);
     return this.#segmentedInput;
+  }
+
+  async getSegments() {
+    const segmentedInput = this.getSegmentedInput();
+    await segmentedInput.runUpdateSegments();
+    return segmentedInput.segments;
   }
 
   toSegments() {

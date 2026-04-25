@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { DASH_FORMATS, getSegments } from '../dasha';
+import { DASH_FORMATS } from '../dasha';
 import { createAssetInput } from './utils';
 
 test('parse bitmovin mpd with drm through the Input API', async () => {
@@ -9,7 +9,7 @@ test('parse bitmovin mpd with drm through the Input API', async () => {
   expect(tracks).toHaveLength(7);
 
   const primaryVideoTrack = await input.getPrimaryVideoTrack();
-  const firstSegment = (await getSegments(primaryVideoTrack!))[0];
+  const firstSegment = (await primaryVideoTrack!.getSegments())[0];
   expect(firstSegment?.encryption?.method).toBe('cenc');
   expect(firstSegment?.encryption?.drm.widevine?.pssh).toBe(
     'AAAAW3Bzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAADsIARIQ62dqu8s0Xpa7z2FmMPGj2hoNd2lkZXZpbmVfdGVzdCIQZmtqM2xqYVNkZmFsa3IzaioCSEQyAA==',

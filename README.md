@@ -22,7 +22,7 @@ npm install dasha@alpha
 
 ```ts
 import fs from 'node:fs/promises';
-import { getSegments, desc, HLS_FORMATS, Input, UrlSource } from 'dasha';
+import { desc, HLS_FORMATS, Input, UrlSource } from 'dasha';
 
 async function saveVideo() {
   const input = new Input({
@@ -45,7 +45,7 @@ async function saveVideo() {
 
   const bestVideoTrack = videoTracks[0];
 
-  const segments = await getSegments(bestVideoTrack);
+  const segments = await bestVideoTrack.getSegments();
 
   const outputPath = 'output.mp4';
   const urls = segments.map((segment) => segment.location.path);
@@ -62,7 +62,7 @@ async function saveVideo() {
 
 ```ts
 import fs from 'node:fs/promises';
-import { DASH_FORMATS, Input, UrlSource, desc, getSegments } from 'dasha';
+import { DASH_FORMATS, Input, UrlSource, desc } from 'dasha';
 
 async function saveDashVideo() {
   const input = new Input({
@@ -80,7 +80,7 @@ async function saveDashVideo() {
   });
 
   const bestVideoTrack = videoTracks[0];
-  const segments = await getSegments(bestVideoTrack);
+  const segments = await bestVideoTrack.getSegments();
 
   const outputPath = 'output.m4s';
   const urls = segments.map((segment) => segment.location.path);

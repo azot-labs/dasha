@@ -1,12 +1,12 @@
 import { expect, test } from 'vitest';
-import { DASH_FORMATS, getSegments } from '../dasha';
+import { DASH_FORMATS } from '../dasha';
 import { createAssetInput } from './utils';
 
 test('parse encrypt info from mpd without init through the Input API', async () => {
   using input = createAssetInput('non-init-drm.mpd', DASH_FORMATS);
 
   const firstVideoTrack = await input.getPrimaryVideoTrack();
-  const firstVideoSegment = (await getSegments(firstVideoTrack!))[0];
+  const firstVideoSegment = (await firstVideoTrack!.getSegments())[0];
   expect(firstVideoSegment?.encryption?.method).toBe('cenc');
   expect(firstVideoSegment?.encryption?.drm.widevine?.pssh).toBe(
     'AAAAb3Bzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAAE8IARIgYjlmYTBhN2M2OWI2MzkxNjk4YmZjZWVjY2EyY2RjMjYaA2NkbiIkYzkyNTMyMjktNWE2NC1iMmU1LThjZDMtMDE1MDZlMmM5NGNh',

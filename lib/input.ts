@@ -1,6 +1,5 @@
 import {
   FilePathSource,
-  Input as MediabunnyInput,
   UrlSource,
   HLS_FORMATS,
   desc,
@@ -9,12 +8,8 @@ import {
   SourceRef,
 } from 'mediabunny';
 import type {
-  Input as MediabunnyInputInstance,
-  InputAudioTrack as MediabunnyInputAudioTrack,
   InputFormat as MediabunnyInputFormat,
   InputOptions as MediabunnyInputOptions,
-  InputTrack as MediabunnyInputTrack,
-  InputVideoTrack as MediabunnyInputVideoTrack,
   Source,
 } from 'mediabunny';
 import type { HlsSegmentedInput, HlsSegment, InputTrackWithBacking } from './mediabunny';
@@ -22,36 +17,43 @@ import {
   DASH,
   DASH_FORMATS,
   DashInput,
-  DashInputAudioTrack,
   DashInputFormat,
   DashInputTrack,
   DashInputVideoTrack,
+  DashInputAudioTrack,
   DashSegment,
   DashSegmentedInput,
   InputTrackQuery,
-  isDashInputTrack,
 } from './dash-input';
+import {
+  SegmentedMediabunnyInput,
+  type MediabunnyAudioTrackWithSegments,
+  type MediabunnyTrackWithSegments,
+  type MediabunnyVideoTrackWithSegments,
+} from './mediabunny-input';
 
 type DashaInputOptions<S extends Source = Source> = Omit<MediabunnyInputOptions<S>, 'formats'> & {
   formats: readonly (MediabunnyInputFormat | DashInputFormat)[];
 };
 
-export type InputTrack =
-  | MediabunnyInputTrack
-  | DashInputTrack;
-
-export type InputVideoTrack =
-  | MediabunnyInputVideoTrack
-  | DashInputVideoTrack;
-
-export type InputAudioTrack =
-  | MediabunnyInputAudioTrack
-  | DashInputAudioTrack;
-
 export type InputSegment = HlsSegment | DashSegment;
 export type InputSegmentedInput = HlsSegmentedInput | DashSegmentedInput;
+export type InputTrack = MediabunnyTrackWithSegments | DashInputTrack;
+export type InputVideoTrack = MediabunnyVideoTrackWithSegments | DashInputVideoTrack;
+export type InputAudioTrack = MediabunnyAudioTrackWithSegments | DashInputAudioTrack;
 
-type BackendInput<S extends Source = Source> = DashInput | MediabunnyInputInstance<S>;
+type InputBackend<S extends Source = Source> = {
+  readonly source: S | Source;
+  getFormat(): Promise<MediabunnyInputFormat | DashInputFormat>;
+  canRead(): Promise<boolean>;
+  getDurationFromMetadata(tracks?: InputTrack[]): Promise<number | null>;
+  getTracks(query?: InputTrackQuery<InputTrack>): Promise<InputTrack[]>;
+  getVideoTracks(query?: InputTrackQuery<InputVideoTrack>): Promise<InputVideoTrack[]>;
+  getAudioTracks(query?: InputTrackQuery<InputAudioTrack>): Promise<InputAudioTrack[]>;
+  getPrimaryVideoTrack(query?: InputTrackQuery<InputVideoTrack>): Promise<InputVideoTrack | null>;
+  getPrimaryAudioTrack(query?: InputTrackQuery<InputAudioTrack>): Promise<InputAudioTrack | null>;
+  dispose(): void;
+};
 
 const isDashFormat = (format: MediabunnyInputFormat | DashInputFormat): format is DashInputFormat =>
   format instanceof DashInputFormat;
@@ -75,23 +77,23 @@ const shouldUseDashBackend = (options: DashaInputOptions) => {
 
 const createBackendInput = <S extends Source = Source>(
   options: DashaInputOptions<S>,
-): BackendInput<S> => {
+): InputBackend<S> => {
   if (shouldUseDashBackend(options)) {
     const source = options.source instanceof SourceRef ? options.source.source : options.source;
-    return new DashInput(source) as BackendInput<S>;
+    return new DashInput(source) as InputBackend<S>;
   }
 
   const formats = options.formats.filter((format) => !isDashFormat(format));
-  return new MediabunnyInput({
+  return new SegmentedMediabunnyInput({
     ...options,
     formats,
-  } as MediabunnyInputOptions<Source>) as BackendInput<S>;
+  } as MediabunnyInputOptions<Source>) as InputBackend<S>;
 };
 
 export class Input<S extends Source = Source> {
   readonly source: Source;
 
-  #backend: BackendInput<S>;
+  #backend: InputBackend<S>;
 
   constructor(options: DashaInputOptions<S>) {
     this.#backend = createBackendInput(options);
@@ -107,31 +109,27 @@ export class Input<S extends Source = Source> {
   }
 
   async getDurationFromMetadata(tracks?: InputTrack[]) {
-    if (!('getDurationFromMetadata' in this.#backend)) {
-      return null;
-    }
-
-    return this.#backend.getDurationFromMetadata?.(tracks as never);
+    return this.#backend.getDurationFromMetadata(tracks);
   }
 
   async getTracks(query?: InputTrackQuery<InputTrack>) {
-    return this.#backend.getTracks(query as never) as Promise<InputTrack[]>;
+    return this.#backend.getTracks(query);
   }
 
   async getVideoTracks(query?: InputTrackQuery<InputVideoTrack>) {
-    return this.#backend.getVideoTracks(query as never) as Promise<InputVideoTrack[]>;
+    return this.#backend.getVideoTracks(query);
   }
 
   async getAudioTracks(query?: InputTrackQuery<InputAudioTrack>) {
-    return this.#backend.getAudioTracks(query as never) as Promise<InputAudioTrack[]>;
+    return this.#backend.getAudioTracks(query);
   }
 
   async getPrimaryVideoTrack(query?: InputTrackQuery<InputVideoTrack>) {
-    return this.#backend.getPrimaryVideoTrack(query as never) as Promise<InputVideoTrack | null>;
+    return this.#backend.getPrimaryVideoTrack(query);
   }
 
   async getPrimaryAudioTrack(query?: InputTrackQuery<InputAudioTrack>) {
-    return this.#backend.getPrimaryAudioTrack(query as never) as Promise<InputAudioTrack | null>;
+    return this.#backend.getPrimaryAudioTrack(query);
   }
 
   dispose() {
@@ -145,27 +143,9 @@ export class Input<S extends Source = Source> {
 
 export const isInput = (value: unknown): value is Input => value instanceof Input;
 
-export const getSegmentedInput = (track: InputTrack): InputSegmentedInput => {
-  if (isDashInputTrack(track)) {
-    return track.getSegmentedInput();
-  }
+export const getSegmentedInput = (track: InputTrack): InputSegmentedInput => track.getSegmentedInput();
 
-  const backing = (track as InputTrackWithBacking)._backing;
-  const internalTrack = backing.internalTrack;
-  return internalTrack.demuxer.getSegmentedInputForPath(internalTrack.fullPath);
-};
-
-export const getSegments = async (track: InputTrack): Promise<InputSegment[]> => {
-  if (isDashInputTrack(track)) {
-    const segmentedInput = track.getSegmentedInput();
-    await segmentedInput.runUpdateSegments();
-    return segmentedInput.segments;
-  }
-
-  const segmentedInput = getSegmentedInput(track) as HlsSegmentedInput;
-  await segmentedInput.runUpdateSegments();
-  return segmentedInput.segments;
-};
+export const getSegments = async (track: InputTrack): Promise<InputSegment[]> => track.getSegments();
 
 export { FilePathSource, UrlSource, HLS_FORMATS, DASH, DASH_FORMATS, desc, asc, prefer };
 export type {

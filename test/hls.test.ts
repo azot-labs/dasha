@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
-import { getSegments, desc, HLS_FORMATS, Input, UrlSource, isInput } from '../dasha';
+import { desc, HLS_FORMATS, Input, UrlSource, isInput } from '../dasha';
 
-test('parse hls with sample aes', async () => {
+test('parse hls with sample aes', { timeout: 15_000 }, async () => {
   const input = new Input({
     source: new UrlSource(
       'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/hls.m3u8',
@@ -24,7 +24,7 @@ test('parse hls with sample aes', async () => {
 
   const bestVideoTrack = videoTracks[0];
 
-  const segments = await getSegments(bestVideoTrack);
+  const segments = await bestVideoTrack.getSegments();
 
   expect(segments.length).toBe(15);
   expect(await bestVideoTrack.getDisplayHeight()).toBe(576);
