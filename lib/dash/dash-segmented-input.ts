@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { DashEncryptionData, DashParsedSegment } from './dash-model';
+import type { DashEncryptionData, DashParsedSegment } from './dash-misc';
 import type { DashInternalTrack } from './dash-track-backing';
 
 export type Segment = {

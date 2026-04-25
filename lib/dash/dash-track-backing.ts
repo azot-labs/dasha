@@ -12,7 +12,7 @@ import {
   type DashParsedAudioTrack,
   type DashParsedTrack,
   type DashParsedVideoTrack,
-} from './dash-model';
+} from './dash-misc';
 import { DashSegmentedInput, type DashSegment } from './dash-segmented-input';
 
 type DashTrackInfo =

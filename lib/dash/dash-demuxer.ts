@@ -16,30 +16,31 @@ import {
 import { ENCRYPT_METHODS } from '../shared/encrypt-method';
 import { ROLE_TYPE } from '../shared/role-type';
 import { checkIsClosedCaption, checkIsSdh } from '../shared/subtitle';
-import { combineUrl, replaceVars } from '../shared/util';
+import { combineUrl } from '../shared/util';
 import { parseDynamicRange } from '../shared/video';
 import {
+  DASH_MIME_TYPE,
+  DASH_TEMPLATE_BANDWIDTH,
+  DASH_TEMPLATE_NUMBER,
+  DASH_TEMPLATE_REPRESENTATION_ID,
+  DASH_TEMPLATE_TIME,
   type DashEncryptionData,
   type DashParsedSegment,
   type DashParsedTrack,
   type DashSegmentState,
-  getDashTrackMatchKey,
-} from './dash-model';
-import {
-  DASH_MIME_TYPE,
-  getSourceHeaders,
-  isDashManifestText,
-  isLikelyDashPath,
-  loadDashManifest,
-} from './dash-misc';
-import {
   createDashTrackDescriptor,
   extendDashBaseUrl,
   filterDashLanguage,
   getDashFrameRate,
+  getDashTrackMatchKey,
   getDashTagAttrs,
+  getSourceHeaders,
+  isDashManifestText,
+  isLikelyDashPath,
+  loadDashManifest,
+  parseDashRange,
+  replaceDashVariables,
 } from './dash-misc';
-import { DASH_TAGS } from './dash-tags';
 import { type DashSegment, DashSegmentedInput } from './dash-segmented-input';
 import {
   createDashInternalTracks,
@@ -47,7 +48,6 @@ import {
   type DashInputTrackBacking,
   type DashInternalTrack,
 } from './dash-track-backing';
-import { parseRange } from './dash-utils';
 
 export type { DashSegment } from './dash-segmented-input';
 export { DashSegmentedInput } from './dash-segmented-input';
@@ -112,7 +112,7 @@ const createRangedSegment = (
   };
 
   if (range) {
-    const [start, expect] = parseRange(range);
+    const [start, expect] = parseDashRange(range);
     segment.startRange = start;
     segment.expectLength = expect;
   }
@@ -332,13 +332,13 @@ const appendTemplatedSegment = (params: {
     timescale,
     variables,
   } = params;
-  variables[DASH_TAGS.TemplateTime] = String(currentTime);
-  variables[DASH_TAGS.TemplateNumber] = String(segmentNumber);
+  variables[DASH_TEMPLATE_TIME] = String(currentTime);
+  variables[DASH_TEMPLATE_NUMBER] = String(segmentNumber);
 
   segmentState.mediaSegments.push({
     sequenceNumber: index,
     duration: duration / timescale,
-    url: combineUrl(segBaseUrl, replaceVars(mediaTemplate, variables)),
+    url: combineUrl(segBaseUrl, replaceDashVariables(mediaTemplate, variables)),
     encryption: null,
     ...(hasTimePlaceholder ? { nameFromVar: String(currentTime) } : {}),
   });
@@ -366,7 +366,7 @@ const applySegmentTimeline = (params: {
   } = params;
   const timelineEntries = timeline.getElementsByTagName('S');
   const timescale = Number(timescaleString);
-  const hasTimePlaceholder = mediaTemplate.includes(DASH_TAGS.TemplateTime);
+  const hasTimePlaceholder = mediaTemplate.includes(DASH_TEMPLATE_TIME);
   let segmentNumber = Number(startNumberString);
   let currentTime = 0;
   let segmentIndex = 0;
@@ -445,7 +445,7 @@ const applyFixedDurationTemplate = (params: {
   } = params;
   const timescale = Number(timescaleString);
   const duration = Number(durationString);
-  const hasNumberPlaceholder = mediaTemplate.includes(DASH_TAGS.TemplateNumber);
+  const hasNumberPlaceholder = mediaTemplate.includes(DASH_TEMPLATE_NUMBER);
   let startNumber = Number(startNumberString);
   let totalNumber = Math.ceil((periodDurationSeconds * timescale) / duration);
 
@@ -465,12 +465,12 @@ const applyFixedDurationTemplate = (params: {
   }
 
   for (let number = startNumber, segmentIndex = 0; number < startNumber + totalNumber; number++) {
-    variables[DASH_TAGS.TemplateNumber] = String(number);
+    variables[DASH_TEMPLATE_NUMBER] = String(number);
 
     segmentState.mediaSegments.push({
       sequenceNumber: isLive ? number : segmentIndex++,
       duration: duration / timescale,
-      url: combineUrl(segBaseUrl, replaceVars(mediaTemplate, variables)),
+      url: combineUrl(segBaseUrl, replaceDashVariables(mediaTemplate, variables)),
       encryption: null,
       ...(hasNumberPlaceholder ? { nameFromVar: String(number) } : {}),
     });
@@ -508,8 +508,8 @@ const applySegmentTemplate = (params: {
   const segmentTemplate = representationTemplates[0] || adaptationSetTemplates[0];
   const fallbackTemplate = adaptationSetTemplates[0] || representationTemplates[0];
   const variables: Record<string, string> = {
-    [DASH_TAGS.TemplateBandwidth]: String(bitrate),
-    [DASH_TAGS.TemplateRepresentationID]: groupId ?? '',
+    [DASH_TEMPLATE_BANDWIDTH]: String(bitrate),
+    [DASH_TEMPLATE_REPRESENTATION_ID]: groupId ?? '',
   };
 
   const presentationTimeOffset =
@@ -532,7 +532,7 @@ const applySegmentTemplate = (params: {
     segmentState.initSegment = {
       sequenceNumber: -1,
       duration: 0,
-      url: combineUrl(segBaseUrl, replaceVars(initialization, variables)),
+      url: combineUrl(segBaseUrl, replaceDashVariables(initialization, variables)),
       encryption: null,
     };
   }

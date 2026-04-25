@@ -2,14 +2,114 @@ import { readFile } from 'node:fs/promises';
 import { Element, LiveNodeList } from '@xmldom/xmldom';
 import type { Source } from 'mediabunny';
 import { combineUrl } from '../shared/util';
-import type { MediaCodec } from '../shared/codec';
+import type { MediaCodec, VideoDynamicRange } from '../shared/codec';
 import { tryParseVideoCodec } from '../shared/video';
 import { tryParseSubtitleCodec } from '../shared/subtitle';
 import { tryParseAudioCodec } from '../shared/audio';
 import { pipe } from '../shared/pipe';
-import type { DashTrackType } from './dash-model';
+import type { RoleType } from '../shared/role-type';
 
 export const DASH_MIME_TYPE = 'application/dash+xml';
+export const DASH_TEMPLATE_REPRESENTATION_ID = '$RepresentationID$';
+export const DASH_TEMPLATE_BANDWIDTH = '$Bandwidth$';
+export const DASH_TEMPLATE_NUMBER = '$Number$';
+export const DASH_TEMPLATE_TIME = '$Time$';
+
+export type DashTrackType = 'video' | 'audio' | 'subtitle';
+
+export type DashEncryptionData = {
+  method: string;
+  key?: Uint8Array;
+  iv?: Uint8Array;
+  drm: {
+    widevine?: { keyId?: string; pssh?: string };
+    playready?: { keyId?: string; pssh?: string };
+    fairplay?: { keyId?: string; pssh?: string };
+  };
+};
+
+export type DashParsedSegment = {
+  sequenceNumber: number | null;
+  duration: number;
+  url: string;
+  startRange?: number;
+  expectLength?: number;
+  encryption: DashEncryptionData | null;
+  nameFromVar?: string;
+};
+
+export type DashSegmentState = {
+  isLive: boolean;
+  refreshIntervalMs: number;
+  initSegment: DashParsedSegment | null;
+  mediaSegments: DashParsedSegment[];
+};
+
+type DashTrackCommon = {
+  type: DashTrackType;
+  codec?: MediaCodec;
+  codecString: string | null;
+  manifestUrl: string;
+  originalUrl: string;
+  languageCode?: string;
+  peakBitrate: number | null;
+  averageBitrate: number | null;
+  name: string | null;
+  default: boolean;
+  role?: RoleType;
+  publishTime?: Date;
+  groupId: string | null;
+  audioGroupId?: string;
+  subtitleGroupId?: string;
+  periodId: string | null;
+  extension: string | null;
+  segmentState: DashSegmentState;
+};
+
+export type DashParsedVideoTrack = DashTrackCommon & {
+  type: 'video';
+  width?: number;
+  height?: number;
+  frameRate?: number;
+  dynamicRange?: VideoDynamicRange;
+};
+
+export type DashParsedAudioTrack = DashTrackCommon & {
+  type: 'audio';
+  numberOfChannels?: number;
+  sampleRate?: number;
+  descriptive?: boolean;
+  joc?: number;
+};
+
+export type DashParsedSubtitleTrack = DashTrackCommon & {
+  type: 'subtitle';
+  cc?: boolean;
+  sdh?: boolean;
+  forced?: boolean;
+};
+
+export type DashParsedTrack = DashParsedVideoTrack | DashParsedAudioTrack | DashParsedSubtitleTrack;
+
+export const getDashTrackSegmentsCount = (track: DashParsedTrack) =>
+  track.segmentState.mediaSegments.length;
+
+export const getDashTrackDuration = (track: DashParsedTrack) =>
+  track.segmentState.mediaSegments.reduce((sum, segment) => sum + segment.duration, 0);
+
+export const getDashTrackMatchKey = (track: DashParsedTrack) =>
+  JSON.stringify({
+    type: track.type,
+    codecString: track.codecString,
+    groupId: track.groupId,
+    periodId: track.periodId,
+    width: track.type === 'video' ? track.width : null,
+    height: track.type === 'video' ? track.height : null,
+    languageCode: track.languageCode ?? null,
+    name: track.name,
+    role: track.role ?? null,
+    extension: track.extension,
+  });
 
 export const getSourcePath = (source: Source): string | undefined => {
   if ('rootPath' in source && typeof source.rootPath === 'string') {
@@ -92,6 +192,18 @@ export const isLikelyDashPath = (source: Source) => {
 
 export const isDashManifestText = (text: string) => /<MPD(?:\s|>)/i.test(text);
 
+export const replaceDashVariables = (text: string, variables: Record<string, string>) => {
+  let result = text;
+  for (const [key, value] of Object.entries(variables)) {
+    result = result.replaceAll(key, String(value));
+  }
+
+  return result.replace(/\$Number%([0-9]+)d\$/g, (_match, width: string) => {
+    const value = variables[DASH_TEMPLATE_NUMBER];
+    return value ? value.padStart(Number.parseInt(width, 10), '0') : '';
+  });
+};
+
 export const createDashTrackDescriptor = (params: {
   codecs: string | null;
   contentType: string | null;
@@ -163,4 +275,9 @@ export const getDashFrameRate = (node: Element): number | undefined => {
 export const filterDashLanguage = (language?: string | null): string | undefined => {
   if (!language) return;
   return language;
+};
+
+export const parseDashRange = (range: string): [number, number] => {
+  const [startRange, end] = range.split('-').map(Number);
+  return [startRange, end - startRange + 1];
 };
