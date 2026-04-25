@@ -11,6 +11,7 @@ import { ROLE_TYPE } from '../role-type';
 import {
   type DashParsedAudioTrack,
   type DashParsedTrack,
+  type DashParsedSubtitleTrack,
   type DashParsedVideoTrack,
 } from './dash-misc';
 import type { DashDemuxer } from './dash-demuxer';
@@ -37,6 +38,21 @@ export type DashInternalTrack = {
   pairingMask: bigint;
   track: DashParsedTrack;
   info: DashTrackInfo;
+};
+
+type DashInternalVideoTrack = DashInternalTrack & {
+  info: Extract<DashTrackInfo, { type: 'video' }>;
+  track: DashParsedVideoTrack;
+};
+
+type DashInternalAudioTrack = DashInternalTrack & {
+  info: Extract<DashTrackInfo, { type: 'audio' }>;
+  track: DashParsedAudioTrack;
+};
+
+type DashInternalSubtitleTrack = DashInternalTrack & {
+  info: Extract<DashTrackInfo, { type: 'subtitle' }>;
+  track: DashParsedSubtitleTrack;
 };
 
 const DEFAULT_TRACK_DISPOSITION: TrackDisposition = {
@@ -214,17 +230,17 @@ abstract class DashInputTrackBackingBase {
   }
 
   async getDurationFromMetadata(_options: DurationMetadataRequestOptions) {
-    return this.internalTrack.track.segmentState.mediaSegments.reduce(
+    return this.internalTrack.track.mediaSegments.reduce(
       (sum, segment) => sum + segment.duration,
       0,
     );
   }
 
   async getLiveRefreshInterval() {
-    if (!this.internalTrack.track.segmentState.isLive) {
+    if (!this.internalTrack.track.isLive) {
       return null;
     }
-    return this.internalTrack.track.segmentState.refreshIntervalMs / 1000;
+    return this.internalTrack.track.refreshIntervalMs / 1000;
   }
 
   getHasOnlyKeyPackets() {
@@ -271,17 +287,9 @@ abstract class DashInputTrackBackingBase {
 }
 
 class DashInputVideoTrackBacking extends DashInputTrackBackingBase {
-  override internalTrack: DashInternalTrack & {
-    info: Extract<DashTrackInfo, { type: 'video' }>;
-    track: DashParsedVideoTrack;
-  };
+  override internalTrack: DashInternalVideoTrack;
 
-  constructor(
-    internalTrack: DashInternalTrack & {
-      info: Extract<DashTrackInfo, { type: 'video' }>;
-      track: DashParsedVideoTrack;
-    },
-  ) {
+  constructor(internalTrack: DashInternalVideoTrack) {
     super(internalTrack);
     this.internalTrack = internalTrack;
   }
@@ -324,17 +332,9 @@ class DashInputVideoTrackBacking extends DashInputTrackBackingBase {
 }
 
 class DashInputAudioTrackBacking extends DashInputTrackBackingBase {
-  override internalTrack: DashInternalTrack & {
-    info: Extract<DashTrackInfo, { type: 'audio' }>;
-    track: DashParsedAudioTrack;
-  };
+  override internalTrack: DashInternalAudioTrack;
 
-  constructor(
-    internalTrack: DashInternalTrack & {
-      info: Extract<DashTrackInfo, { type: 'audio' }>;
-      track: DashParsedAudioTrack;
-    },
-  ) {
+  constructor(internalTrack: DashInternalAudioTrack) {
     super(internalTrack);
     this.internalTrack = internalTrack;
   }
@@ -357,33 +357,33 @@ class DashInputAudioTrackBacking extends DashInputTrackBackingBase {
 }
 
 class DashInputSubtitleTrackBacking extends DashInputTrackBackingBase {
+  override internalTrack: DashInternalSubtitleTrack;
+
+  constructor(internalTrack: DashInternalSubtitleTrack) {
+    super(internalTrack);
+    this.internalTrack = internalTrack;
+  }
+
   getType() {
     return 'subtitle' as const;
   }
 }
 
+const createDashTrackBacking = (internalTrack: DashInternalTrack): DashInputTrackBacking => {
+  if (internalTrack.info.type === 'video') {
+    return new DashInputVideoTrackBacking(internalTrack as DashInternalVideoTrack);
+  }
+
+  if (internalTrack.info.type === 'audio') {
+    return new DashInputAudioTrackBacking(internalTrack as DashInternalAudioTrack);
+  }
+
+  return new DashInputSubtitleTrackBacking(internalTrack as DashInternalSubtitleTrack);
+};
+
 export const createDashTrackBackings = (internalTracks: DashInternalTrack[]) =>
   internalTracks.map((internalTrack) => {
-    let backing: DashInputTrackBacking;
-
-    if (internalTrack.info.type === 'video') {
-      backing = new DashInputVideoTrackBacking(
-        internalTrack as DashInternalTrack & {
-          info: Extract<DashTrackInfo, { type: 'video' }>;
-          track: DashParsedVideoTrack;
-        },
-      );
-    } else if (internalTrack.info.type === 'audio') {
-      backing = new DashInputAudioTrackBacking(
-        internalTrack as DashInternalTrack & {
-          info: Extract<DashTrackInfo, { type: 'audio' }>;
-          track: DashParsedAudioTrack;
-        },
-      );
-    } else {
-      backing = new DashInputSubtitleTrackBacking(internalTrack);
-    }
-
+    const backing = createDashTrackBacking(internalTrack);
     internalTrack.backingTrack = backing;
     return backing;
   });

@@ -6,7 +6,6 @@ export type Segment = {
   timestamp: number;
   duration: number;
   relativeToUnixEpoch: boolean;
-  firstSegment: DashSegment | null;
 };
 
 export type DashSegmentLocation = {
@@ -48,7 +47,7 @@ const createInitSegment = (
 });
 
 export const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] => {
-  const mediaSegments = internalTrack.track.segmentState.mediaSegments;
+  const mediaSegments = internalTrack.track.mediaSegments;
   if (mediaSegments.length === 0) return [];
 
   let timestamp = 0;
@@ -71,8 +70,8 @@ export const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegme
   }
 
   const firstSegment = segments[0] ?? null;
-  const initSegment = internalTrack.track.segmentState.initSegment
-    ? createInitSegment(internalTrack.track.segmentState.initSegment, firstSegment)
+  const initSegment = internalTrack.track.initSegment
+    ? createInitSegment(internalTrack.track.initSegment, firstSegment)
     : null;
 
   for (const segment of segments) {
@@ -117,13 +116,12 @@ export class DashSegmentedInput {
   }
 
   getRemainingWaitTimeMs() {
-    const segmentState = this.internalTrack.track.segmentState;
-    if (!segmentState.isLive) {
+    if (!this.internalTrack.track.isLive) {
       return 0;
     }
 
     const elapsed = performance.now() - this.lastSegmentUpdateTime;
-    const result = Math.max(0, segmentState.refreshIntervalMs - elapsed);
+    const result = Math.max(0, this.internalTrack.track.refreshIntervalMs - elapsed);
     if (result <= 50) {
       // Match HLS behaviour: skip tiny waits to avoid timing races around live refreshes.
       return 0;
@@ -137,8 +135,8 @@ export class DashSegmentedInput {
       await this.runUpdateSegments();
     }
 
-    return this.internalTrack.track.segmentState.isLive
-      ? this.internalTrack.track.segmentState.refreshIntervalMs / 1000
+    return this.internalTrack.track.isLive
+      ? this.internalTrack.track.refreshIntervalMs / 1000
       : null;
   }
 }

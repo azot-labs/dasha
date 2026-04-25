@@ -23,13 +23,14 @@ import {
   type DashEncryptionData,
   type DashParsedSegment,
   type DashParsedTrack,
-  type DashSegmentState,
   createDashTrackDescriptor,
   extendDashBaseUrl,
-  filterDashLanguage,
+  getDirectDashChild,
+  getDirectDashChildren,
   getDashFrameRate,
   getDashTrackMatchKey,
   getDashTagAttrs,
+  getInheritedDashChild,
   getSourceHeaders,
   isDashManifestText,
   isLikelyDashPath,
@@ -88,23 +89,20 @@ const processDashContent = (mpdContent: string) => {
   return replaceFirst(mpdContent, '<MPD ', `<MPD ${missingNamespaceDefinitions.join(' ')} `);
 };
 
-const createDashSegmentState = (
-  isLive: boolean,
-  timeShiftBufferDepth: string,
-): DashSegmentState => ({
-  isLive,
-  refreshIntervalMs: Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2,
-  initSegment: null,
-  mediaSegments: [],
-});
+const getDashRefreshIntervalMs = (timeShiftBufferDepth: string) =>
+  Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2;
 
-const addWholeResourceSegment = (segmentState: DashSegmentState, url: string, duration: number) => {
-  segmentState.mediaSegments.push({
+const addWholeResourceSegment = (track: DashParsedTrack, url: string, duration: number) => {
+  track.mediaSegments.push({
     sequenceNumber: 0,
     duration,
     url,
     encryption: null,
   });
+};
+
+const appendDashSegment = (track: DashParsedTrack, segment: DashParsedSegment) => {
+  track.mediaSegments.push(segment);
 };
 
 const createDashRangedSegment = (
@@ -167,7 +165,6 @@ const createDashTrack = (params: {
     contentType,
     mimeType,
   });
-  const segmentState = createDashSegmentState(isLive, timeShiftBufferDepth);
   const track = {
     type: descriptor.type,
     codec: descriptor.codec,
@@ -181,7 +178,10 @@ const createDashTrack = (params: {
     groupId: representation.getAttribute('id'),
     periodId: period.getAttribute('id'),
     extension: null,
-    segmentState,
+    isLive,
+    refreshIntervalMs: getDashRefreshIntervalMs(timeShiftBufferDepth),
+    initSegment: null,
+    mediaSegments: [],
   } as DashParsedTrack;
 
   const roles = getDashTagAttrs('Role', representation, adaptationSet);
@@ -190,16 +190,15 @@ const createDashTrack = (params: {
   const accessibilities = getDashTagAttrs('Accessibility', representation, adaptationSet);
   const audioChannelConfigs = getDashTagAttrs(
     'AudioChannelConfiguration',
-    adaptationSet,
     representation,
+    adaptationSet,
   );
   const channelsString = audioChannelConfigs[0]?.value;
   const width = representation.getAttribute('width');
   const height = representation.getAttribute('height');
 
-  track.languageCode = filterDashLanguage(
-    representation.getAttribute('lang') || adaptationSet.getAttribute('lang'),
-  );
+  track.languageCode =
+    representation.getAttribute('lang') || adaptationSet.getAttribute('lang') || undefined;
 
   const volumeAdjust = representation.getAttribute('volumeAdjust');
   if (volumeAdjust) {
@@ -214,9 +213,13 @@ const createDashTrack = (params: {
   }
 
   if (track.type === 'video') {
-    track.width = Number(width);
-    track.height = Number(height);
-    track.frameRate = frameRate || getDashFrameRate(representation);
+    if (width) {
+      track.width = Number(width);
+    }
+    if (height) {
+      track.height = Number(height);
+    }
+    track.frameRate = frameRate ?? getDashFrameRate(representation);
     if (track.codecString && supplementalProps && essentialProps) {
       track.dynamicRange = parseDynamicRange(track.codecString, supplementalProps, essentialProps);
     }
@@ -256,41 +259,69 @@ const normalizeDashTrackExtension = (track: DashParsedTrack) => {
     track.extension = 'm4s';
   }
 
-  if (
-    track.type !== 'subtitle' &&
-    (track.extension == null || track.segmentState.mediaSegments.length > 1)
-  ) {
+  if (track.type !== 'subtitle' && (track.extension == null || track.mediaSegments.length > 1)) {
     track.extension = 'm4s';
   }
 };
 
-const applySegmentBase = (representation: Element, track: DashParsedTrack, segBaseUrl: string) => {
-  const segmentBaseElement = representation.getElementsByTagName('SegmentBase')[0];
+const getDashSegmentSourceChild = (
+  tag: string,
+  representation: Element,
+  adaptationSet: Element,
+  period: Element,
+) => getInheritedDashChild(tag, representation, adaptationSet, period);
+
+const applySegmentBase = (params: {
+  adaptationSet: Element;
+  period: Element;
+  representation: Element;
+  track: DashParsedTrack;
+  segmentBaseUrl: string;
+}) => {
+  const { adaptationSet, period, representation, track, segmentBaseUrl } = params;
+  const segmentBaseElement = getDashSegmentSourceChild(
+    'SegmentBase',
+    representation,
+    adaptationSet,
+    period,
+  );
   if (!segmentBaseElement) return;
 
-  const initialization = segmentBaseElement.getElementsByTagName('Initialization')[0];
+  const initialization = getDirectDashChild(segmentBaseElement, 'Initialization');
   if (!initialization) return;
 
   const sourceUrl = initialization.getAttribute('sourceURL');
   if (!sourceUrl) return;
 
-  track.segmentState.initSegment = createDashRangedSegment(
-    combineUrl(segBaseUrl, sourceUrl),
+  track.initSegment = createDashRangedSegment(
+    combineUrl(segmentBaseUrl, sourceUrl),
     -1,
     initialization.getAttribute('range'),
   );
 };
 
-const applySegmentList = (representation: Element, track: DashParsedTrack, segBaseUrl: string) => {
-  const segmentList = representation.getElementsByTagName('SegmentList')[0];
+const applySegmentList = (params: {
+  adaptationSet: Element;
+  period: Element;
+  representation: Element;
+  track: DashParsedTrack;
+  segmentBaseUrl: string;
+}) => {
+  const { adaptationSet, period, representation, track, segmentBaseUrl } = params;
+  const segmentList = getDashSegmentSourceChild(
+    'SegmentList',
+    representation,
+    adaptationSet,
+    period,
+  );
   if (!segmentList) return;
 
-  const initialization = segmentList.getElementsByTagName('Initialization')[0];
+  const initialization = getDirectDashChild(segmentList, 'Initialization');
   if (initialization) {
     const sourceUrl = initialization.getAttribute('sourceURL');
     if (sourceUrl) {
-      track.segmentState.initSegment = createDashRangedSegment(
-        combineUrl(segBaseUrl, sourceUrl),
+      track.initSegment = createDashRangedSegment(
+        combineUrl(segmentBaseUrl, sourceUrl),
         -1,
         initialization.getAttribute('range'),
       );
@@ -300,19 +331,20 @@ const applySegmentList = (representation: Element, track: DashParsedTrack, segBa
   const duration = Number(segmentList.getAttribute('duration'));
   const timescale = Number(segmentList.getAttribute('timescale') || '1');
 
-  for (const [segmentIndex, segmentUrl] of Array.from(
-    segmentList.getElementsByTagName('SegmentURL'),
+  for (const [segmentIndex, segmentUrl] of getDirectDashChildren(
+    segmentList,
+    'SegmentURL',
   ).entries()) {
     const media = segmentUrl.getAttribute('media');
     if (!media) continue;
 
     const segment = createDashRangedSegment(
-      combineUrl(segBaseUrl, media),
+      combineUrl(segmentBaseUrl, media),
       segmentIndex,
       segmentUrl.getAttribute('mediaRange'),
     );
     segment.duration = duration / timescale;
-    track.segmentState.mediaSegments.push(segment);
+    appendDashSegment(track, segment);
   }
 };
 
@@ -322,28 +354,18 @@ const appendTemplatedSegment = (params: {
   hasTimePlaceholder: boolean;
   index: number;
   mediaTemplate: string;
-  segmentState: DashSegmentState;
+  track: DashParsedTrack;
   segmentNumber: number;
   segBaseUrl: string;
   timescale: number;
   variables: Record<string, string>;
 }) => {
-  const {
-    currentTime,
-    duration,
-    hasTimePlaceholder,
-    index,
-    mediaTemplate,
-    segmentState,
-    segmentNumber,
-    segBaseUrl,
-    timescale,
-    variables,
-  } = params;
+  const { currentTime, duration, hasTimePlaceholder, index, mediaTemplate, track } = params;
+  const { segmentNumber, segBaseUrl, timescale, variables } = params;
   variables[DASH_TEMPLATE_TIME] = String(currentTime);
   variables[DASH_TEMPLATE_NUMBER] = String(segmentNumber);
 
-  segmentState.mediaSegments.push({
+  appendDashSegment(track, {
     sequenceNumber: index,
     duration: duration / timescale,
     url: combineUrl(segBaseUrl, replaceDashVariables(mediaTemplate, variables)),
@@ -355,24 +377,16 @@ const appendTemplatedSegment = (params: {
 const applySegmentTimeline = (params: {
   mediaTemplate: string;
   periodDurationSeconds: number;
-  segmentState: DashSegmentState;
+  track: DashParsedTrack;
   segBaseUrl: string;
   startNumberString: string;
   timeline: Element;
   timescaleString: string;
   variables: Record<string, string>;
 }) => {
-  const {
-    mediaTemplate,
-    periodDurationSeconds,
-    segmentState,
-    segBaseUrl,
-    startNumberString,
-    timeline,
-    timescaleString,
-    variables,
-  } = params;
-  const timelineEntries = timeline.getElementsByTagName('S');
+  const { mediaTemplate, periodDurationSeconds, track, segBaseUrl } = params;
+  const { startNumberString, timeline, timescaleString, variables } = params;
+  const timelineEntries = getDirectDashChildren(timeline, 'S');
   const timescale = Number(timescaleString);
   const hasTimePlaceholder = mediaTemplate.includes(DASH_TEMPLATE_TIME);
   let segmentNumber = Number(startNumberString);
@@ -392,7 +406,7 @@ const applySegmentTimeline = (params: {
       hasTimePlaceholder,
       index: segmentIndex++,
       mediaTemplate,
-      segmentState,
+      track,
       segmentNumber: segmentNumber++,
       segBaseUrl,
       timescale,
@@ -411,7 +425,7 @@ const applySegmentTimeline = (params: {
         hasTimePlaceholder,
         index: segmentIndex++,
         mediaTemplate,
-        segmentState,
+        track,
         segmentNumber: segmentNumber++,
         segBaseUrl,
         timescale,
@@ -429,7 +443,7 @@ const applyFixedDurationTemplate = (params: {
   isLive: boolean;
   mediaTemplate: string;
   periodDurationSeconds: number;
-  segmentState: DashSegmentState;
+  track: DashParsedTrack;
   presentationTimeOffset: string;
   segBaseUrl: string;
   startNumberString: string;
@@ -437,20 +451,10 @@ const applyFixedDurationTemplate = (params: {
   timescaleString: string;
   variables: Record<string, string>;
 }) => {
-  const {
-    availabilityStartTime,
-    durationString,
-    isLive,
-    mediaTemplate,
-    periodDurationSeconds,
-    segmentState,
-    presentationTimeOffset,
-    segBaseUrl,
-    startNumberString,
-    timeShiftBufferDepth,
-    timescaleString,
-    variables,
-  } = params;
+  const { availabilityStartTime, durationString, isLive, mediaTemplate, periodDurationSeconds } =
+    params;
+  const { presentationTimeOffset, segBaseUrl, startNumberString, timeShiftBufferDepth } = params;
+  const { timescaleString, track, variables } = params;
   const timescale = Number(timescaleString);
   const duration = Number(durationString);
   const hasNumberPlaceholder = mediaTemplate.includes(DASH_TEMPLATE_NUMBER);
@@ -475,7 +479,7 @@ const applyFixedDurationTemplate = (params: {
   for (let number = startNumber, segmentIndex = 0; number < startNumber + totalNumber; number++) {
     variables[DASH_TEMPLATE_NUMBER] = String(number);
 
-    segmentState.mediaSegments.push({
+    appendDashSegment(track, {
       sequenceNumber: isLive ? number : segmentIndex++,
       duration: duration / timescale,
       url: combineUrl(segBaseUrl, replaceDashVariables(mediaTemplate, variables)),
@@ -491,53 +495,57 @@ const applySegmentTemplate = (params: {
   bitrate: number;
   groupId: string | null;
   isLive: boolean;
+  period: Element;
   periodDurationSeconds: number;
   representation: Element;
   segBaseUrl: string;
-  segmentState: DashSegmentState;
+  track: DashParsedTrack;
   timeShiftBufferDepth: string;
 }) => {
-  const {
-    adaptationSet,
-    availabilityStartTime,
-    bitrate,
-    groupId,
-    isLive,
-    periodDurationSeconds,
-    representation,
-    segBaseUrl,
-    segmentState,
-    timeShiftBufferDepth,
-  } = params;
-  const adaptationSetTemplates = adaptationSet.getElementsByTagName('SegmentTemplate');
-  const representationTemplates = representation.getElementsByTagName('SegmentTemplate');
-  if (!adaptationSetTemplates.length && !representationTemplates.length) return;
+  const { adaptationSet, availabilityStartTime, bitrate, groupId, isLive, period } = params;
+  const { periodDurationSeconds, representation, segBaseUrl, track, timeShiftBufferDepth } = params;
+  const segmentTemplates = [
+    getDirectDashChild(representation, 'SegmentTemplate'),
+    getDirectDashChild(adaptationSet, 'SegmentTemplate'),
+    getDirectDashChild(period, 'SegmentTemplate'),
+  ].filter((template): template is Element => !!template);
+  const segmentTemplate = segmentTemplates[0];
+  if (!segmentTemplate) {
+    return;
+  }
 
-  const segmentTemplate = representationTemplates[0] || adaptationSetTemplates[0];
-  const fallbackTemplate = adaptationSetTemplates[0] || representationTemplates[0];
+  const getTemplateAttribute = (name: string) => {
+    for (const template of segmentTemplates) {
+      const value = template.getAttribute(name);
+      if (value) {
+        return value;
+      }
+    }
+    return null;
+  };
+
+  const getTemplateTimeline = () => {
+    for (const template of segmentTemplates) {
+      const timeline = getDirectDashChild(template, 'SegmentTimeline');
+      if (timeline) {
+        return timeline;
+      }
+    }
+  };
+
   const variables: Record<string, string> = {
     [DASH_TEMPLATE_BANDWIDTH]: String(bitrate),
     [DASH_TEMPLATE_REPRESENTATION_ID]: groupId ?? '',
   };
 
-  const presentationTimeOffset =
-    segmentTemplate.getAttribute('presentationTimeOffset') ||
-    fallbackTemplate.getAttribute('presentationTimeOffset') ||
-    '0';
-  const timescaleString =
-    segmentTemplate.getAttribute('timescale') || fallbackTemplate.getAttribute('timescale') || '1';
-  const durationString =
-    segmentTemplate.getAttribute('duration') || fallbackTemplate.getAttribute('duration');
-  const startNumberString =
-    segmentTemplate.getAttribute('startNumber') ||
-    fallbackTemplate.getAttribute('startNumber') ||
-    '1';
-  const initialization =
-    segmentTemplate.getAttribute('initialization') ||
-    fallbackTemplate.getAttribute('initialization');
+  const presentationTimeOffset = getTemplateAttribute('presentationTimeOffset') || '0';
+  const timescaleString = getTemplateAttribute('timescale') || '1';
+  const durationString = getTemplateAttribute('duration');
+  const startNumberString = getTemplateAttribute('startNumber') || '1';
+  const initialization = getTemplateAttribute('initialization');
 
   if (initialization) {
-    segmentState.initSegment = {
+    track.initSegment = {
       sequenceNumber: -1,
       duration: 0,
       url: combineUrl(segBaseUrl, replaceDashVariables(initialization, variables)),
@@ -545,16 +553,15 @@ const applySegmentTemplate = (params: {
     };
   }
 
-  const mediaTemplate =
-    segmentTemplate.getAttribute('media') || fallbackTemplate.getAttribute('media');
+  const mediaTemplate = getTemplateAttribute('media');
   if (!mediaTemplate) return;
 
-  const segmentTimeline = segmentTemplate.getElementsByTagName('SegmentTimeline')[0];
+  const segmentTimeline = getTemplateTimeline();
   if (segmentTimeline) {
     applySegmentTimeline({
       mediaTemplate,
       periodDurationSeconds,
-      segmentState,
+      track,
       segBaseUrl,
       startNumberString,
       timeline: segmentTimeline,
@@ -572,7 +579,7 @@ const applySegmentTemplate = (params: {
     isLive,
     mediaTemplate,
     periodDurationSeconds,
-    segmentState,
+    track,
     presentationTimeOffset,
     segBaseUrl,
     startNumberString,
@@ -587,8 +594,8 @@ const ensureFallbackMediaSegment = (
   segBaseUrl: string,
   periodDurationSeconds: number,
 ) => {
-  if (track.segmentState.mediaSegments.length > 0) return;
-  addWholeResourceSegment(track.segmentState, segBaseUrl, periodDurationSeconds);
+  if (track.mediaSegments.length > 0) return;
+  addWholeResourceSegment(track, segBaseUrl, periodDurationSeconds);
 };
 
 const cloneEncryption = (encryption: DashEncryptionData | null): DashEncryptionData | null =>
@@ -606,9 +613,9 @@ const applyContentProtection = (
   representation: Element,
   track: DashParsedTrack,
 ) => {
-  const adaptationSetProtections = adaptationSet.getElementsByTagName('ContentProtection');
-  const representationProtections = representation.getElementsByTagName('ContentProtection');
-  const contentProtections = representationProtections[0]
+  const representationProtections = getDirectDashChildren(representation, 'ContentProtection');
+  const adaptationSetProtections = getDirectDashChildren(adaptationSet, 'ContentProtection');
+  const contentProtections = representationProtections.length
     ? representationProtections
     : adaptationSetProtections;
   if (!contentProtections.length) return;
@@ -622,7 +629,7 @@ const applyContentProtection = (
     const schemeIdUri = contentProtection.getAttribute('schemeIdUri');
     const defaultKID = contentProtection.getAttribute('cenc:default_KID') || undefined;
     const pssh =
-      contentProtection.getElementsByTagName('cenc:pssh')[0]?.textContent?.trim() || undefined;
+      getDirectDashChild(contentProtection, 'cenc:pssh')?.textContent?.trim() || undefined;
     const drmData = { keyId: defaultKID, pssh };
 
     if (schemeIdUri?.includes(WIDEVINE_SYSTEM_ID)) {
@@ -632,11 +639,11 @@ const applyContentProtection = (
     }
   }
 
-  if (track.segmentState.initSegment) {
-    track.segmentState.initSegment.encryption = cloneEncryption(encryption);
+  if (track.initSegment) {
+    track.initSegment.encryption = cloneEncryption(encryption);
   }
 
-  for (const segment of track.segmentState.mediaSegments) {
+  for (const segment of track.mediaSegments) {
     if (!segment.encryption) {
       segment.encryption = cloneEncryption(encryption);
     }
@@ -671,8 +678,8 @@ const mergeDashPeriodTrack = (
     return;
   }
 
-  const lastSegment = existingTrack.segmentState.mediaSegments.at(-1);
-  const incomingSegments = track.segmentState.mediaSegments;
+  const lastSegment = existingTrack.mediaSegments.at(-1);
+  const incomingSegments = track.mediaSegments;
   const incomingLastSegment = incomingSegments.at(-1);
   if (!lastSegment || !incomingLastSegment) {
     return;
@@ -685,7 +692,7 @@ const mergeDashPeriodTrack = (
         segment.sequenceNumber += startIndex;
       }
     }
-    existingTrack.segmentState.mediaSegments.push(...incomingSegments);
+    existingTrack.mediaSegments.push(...incomingSegments);
     return;
   }
 
@@ -770,7 +777,7 @@ export class DashDemuxer {
   async refreshTrackSegments(track: DashInternalTrack) {
     await this.readMetadata();
 
-    if (!track.track.segmentState.isLive) {
+    if (!track.track.isLive) {
       return;
     }
     if (!this.manifestUrl.startsWith('http://') && !this.manifestUrl.startsWith('https://')) {
@@ -797,7 +804,7 @@ export class DashDemuxer {
     const manifest = this._parseManifest(rawText);
     const tracks: DashParsedTrack[] = [];
 
-    for (const period of manifest.mpdElement.getElementsByTagName('Period')) {
+    for (const period of getDirectDashChildren(manifest.mpdElement, 'Period')) {
       this._appendPeriodTracks(tracks, manifest, period);
     }
 
@@ -818,7 +825,7 @@ export class DashDemuxer {
       mediaPresentationDuration: mpdElement.getAttribute('mediaPresentationDuration'),
     };
 
-    const baseUrlElement = mpdElement.getElementsByTagName('BaseURL')[0];
+    const baseUrlElement = getDirectDashChild(mpdElement, 'BaseURL');
     if (baseUrlElement?.textContent) {
       let baseUrl = baseUrlElement.textContent;
       if (baseUrl.includes('kkbox.com.tw/')) {
@@ -840,7 +847,7 @@ export class DashDemuxer {
     ).total('seconds');
     const periodBaseUrl = extendDashBaseUrl(period, this._baseUrl);
 
-    for (const adaptationSet of period.getElementsByTagName('AdaptationSet')) {
+    for (const adaptationSet of getDirectDashChildren(period, 'AdaptationSet')) {
       this._appendAdaptationSetTracks({
         tracks,
         manifest,
@@ -867,7 +874,7 @@ export class DashDemuxer {
     let contentType = adaptationSet.getAttribute('contentType');
     let mimeType = adaptationSet.getAttribute('mimeType');
 
-    for (const representation of adaptationSet.getElementsByTagName('Representation')) {
+    for (const representation of getDirectDashChildren(adaptationSet, 'Representation')) {
       const segmentBaseUrl = extendDashBaseUrl(representation, adaptationSetBaseUrl);
       contentType ||= representation.getAttribute('contentType');
       mimeType ||= representation.getAttribute('mimeType');
@@ -885,6 +892,7 @@ export class DashDemuxer {
 
       this._populateTrackSegments({
         adaptationSet,
+        period,
         representation,
         track,
         manifest,
@@ -936,6 +944,7 @@ export class DashDemuxer {
 
   _populateTrackSegments(params: {
     adaptationSet: Element;
+    period: Element;
     representation: Element;
     track: DashParsedTrack;
     manifest: DashManifestInfo;
@@ -945,6 +954,7 @@ export class DashDemuxer {
   }): void {
     const {
       adaptationSet,
+      period,
       representation,
       track,
       manifest,
@@ -953,18 +963,19 @@ export class DashDemuxer {
       bitrate,
     } = params;
 
-    applySegmentBase(representation, track, segmentBaseUrl);
-    applySegmentList(representation, track, segmentBaseUrl);
+    applySegmentBase({ adaptationSet, period, representation, track, segmentBaseUrl });
+    applySegmentList({ adaptationSet, period, representation, track, segmentBaseUrl });
     applySegmentTemplate({
       adaptationSet,
       availabilityStartTime: manifest.availabilityStartTime,
       bitrate,
       groupId: track.groupId,
       isLive: manifest.isLive,
+      period,
       periodDurationSeconds,
       representation,
       segBaseUrl: segmentBaseUrl,
-      segmentState: track.segmentState,
+      track,
       timeShiftBufferDepth: manifest.timeShiftBufferDepth,
     });
     ensureFallbackMediaSegment(track, segmentBaseUrl, periodDurationSeconds);
@@ -981,8 +992,7 @@ export class DashDemuxer {
     );
     if (!matchingTracks.length) {
       matchingTracks = nextTracks.filter(
-        (candidate) =>
-          candidate.segmentState.initSegment?.url === currentTrack.segmentState.initSegment?.url,
+        (candidate) => candidate.initSegment?.url === currentTrack.initSegment?.url,
       );
     }
 
@@ -1007,7 +1017,10 @@ export class DashDemuxer {
         continue;
       }
 
-      track.segmentState = nextTrack.segmentState;
+      track.isLive = nextTrack.isLive;
+      track.refreshIntervalMs = nextTrack.refreshIntervalMs;
+      track.initSegment = nextTrack.initSegment;
+      track.mediaSegments = nextTrack.mediaSegments;
       track.publishTime = nextTrack.publishTime;
       track.manifestUrl = nextTrack.manifestUrl;
       track.originalUrl = nextTrack.originalUrl;

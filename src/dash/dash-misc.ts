@@ -1,12 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import { Element, LiveNodeList } from '@xmldom/xmldom';
+import { Element } from '@xmldom/xmldom';
 import type { Source } from 'mediabunny';
 import { combineUrl } from '../util';
 import type { MediaCodec, VideoDynamicRange } from '../codec';
 import { tryParseVideoCodec } from '../video';
 import { tryParseSubtitleCodec } from '../subtitle';
 import { tryParseAudioCodec } from '../audio';
-import { pipe } from '../pipe';
 import type { RoleType } from '../role-type';
 
 export const DASH_MIME_TYPE = 'application/dash+xml';
@@ -38,13 +37,6 @@ export type DashParsedSegment = {
   nameFromVar?: string;
 };
 
-export type DashSegmentState = {
-  isLive: boolean;
-  refreshIntervalMs: number;
-  initSegment: DashParsedSegment | null;
-  mediaSegments: DashParsedSegment[];
-};
-
 type DashTrackCommon = {
   type: DashTrackType;
   codec?: MediaCodec;
@@ -63,7 +55,10 @@ type DashTrackCommon = {
   subtitleGroupId?: string;
   periodId: string | null;
   extension: string | null;
-  segmentState: DashSegmentState;
+  isLive: boolean;
+  refreshIntervalMs: number;
+  initSegment: DashParsedSegment | null;
+  mediaSegments: DashParsedSegment[];
 };
 
 export type DashParsedVideoTrack = DashTrackCommon & {
@@ -90,12 +85,6 @@ export type DashParsedSubtitleTrack = DashTrackCommon & {
 };
 
 export type DashParsedTrack = DashParsedVideoTrack | DashParsedAudioTrack | DashParsedSubtitleTrack;
-
-export const getDashTrackSegmentsCount = (track: DashParsedTrack) =>
-  track.segmentState.mediaSegments.length;
-
-export const getDashTrackDuration = (track: DashParsedTrack) =>
-  track.segmentState.mediaSegments.reduce((sum, segment) => sum + segment.duration, 0);
 
 export const getDashTrackMatchKey = (track: DashParsedTrack) =>
   JSON.stringify({
@@ -233,34 +222,46 @@ export const createDashTrackDescriptor = (params: {
   throw new Error('Unable to determine the type of a track, cannot continue...');
 };
 
-const selectNonEmpty = (args: { tag: string; elements: Element[] }) => {
-  for (const element of args.elements) {
-    const results = element.getElementsByTagName(args.tag);
-    if (results.length) return results;
-  }
-};
+export const getDirectDashChildren = (node: Element, tag: string): Element[] =>
+  node.getElementsByTagName(tag).filter((child) => !!child.parentNode?.isSameNode(node));
 
-const toSchemeValueArray = (elements?: LiveNodeList<Element>) => {
-  const results: { schemeIdUri: string; value?: string }[] = [];
-  if (!elements) return results;
-  for (const element of elements) {
-    const schemeIdUri = element.getAttribute('schemeIdUri');
-    const value = element.getAttribute('value') ?? undefined;
-    if (schemeIdUri) results.push({ schemeIdUri, value });
+export const getDirectDashChild = (node: Element, tag: string): Element | undefined =>
+  getDirectDashChildren(node, tag)[0];
+
+export const getInheritedDashChild = (tag: string, ...nodes: Element[]): Element | undefined => {
+  for (const node of nodes) {
+    const child = getDirectDashChild(node, tag);
+    if (child) {
+      return child;
+    }
   }
-  return results;
 };
 
 export const getDashTagAttrs = (tag: string, ...elements: Element[]) => {
-  const adapter = pipe(selectNonEmpty, toSchemeValueArray);
-  return adapter({ tag, elements });
+  for (const element of elements) {
+    const matches = getDirectDashChildren(element, tag);
+    if (!matches.length) {
+      continue;
+    }
+
+    return matches.flatMap((match) => {
+      const schemeIdUri = match.getAttribute('schemeIdUri');
+      if (!schemeIdUri) {
+        return [];
+      }
+
+      return {
+        schemeIdUri,
+        value: match.getAttribute('value') ?? undefined,
+      };
+    });
+  }
+
+  return [];
 };
 
 export const extendDashBaseUrl = (node: Element, baseUrl: string) => {
-  const targets = node
-    .getElementsByTagName('BaseURL')
-    .filter((n) => !!n.parentNode?.isSameNode(node));
-  const target = targets[0];
+  const target = getDirectDashChild(node, 'BaseURL');
   if (target?.textContent) return combineUrl(baseUrl, target.textContent);
   return baseUrl;
 };
@@ -270,11 +271,6 @@ export const getDashFrameRate = (node: Element): number | undefined => {
   if (!frameRate || !frameRate.includes('/')) return;
   const value = Number(frameRate.split('/')[0]) / Number(frameRate.split('/')[1]);
   return Number(value.toFixed(3));
-};
-
-export const filterDashLanguage = (language?: string | null): string | undefined => {
-  if (!language) return;
-  return language;
 };
 
 export const parseDashRange = (range: string): [number, number] => {
