@@ -263,17 +263,47 @@ export class DashSegmentedInput {
     }
   }
 
-  async getNextSegment(segment: DashSegment, options: SegmentRetrievalOptions) {
-    const index = this.segments.indexOf(segment);
-    if (index === -1) {
-      throw new Error('Segment was not created by this segmented input.');
+  getNextSegmentIndex(segment: DashSegment) {
+    const currentIndex = this.segments.indexOf(segment);
+    if (currentIndex !== -1) {
+      return currentIndex + 1;
     }
 
-    const nextIndex = index + 1;
+    if (segment.sequenceNumber !== null) {
+      const matchingSequenceIndex = this.segments.findIndex(
+        (candidate) => candidate.sequenceNumber === segment.sequenceNumber,
+      );
+      if (matchingSequenceIndex !== -1) {
+        return matchingSequenceIndex + 1;
+      }
+
+      return this.segments.findIndex(
+        (candidate) =>
+          candidate.sequenceNumber !== null && candidate.sequenceNumber > segment.sequenceNumber!,
+      );
+    }
+
+    const matchingLocationIndex = this.segments.findIndex(
+      (candidate) =>
+        candidate.timestamp === segment.timestamp &&
+        candidate.duration === segment.duration &&
+        candidate.location.path === segment.location.path &&
+        candidate.location.offset === segment.location.offset &&
+        candidate.location.length === segment.location.length,
+    );
+    if (matchingLocationIndex !== -1) {
+      return matchingLocationIndex + 1;
+    }
+
+    return this.segments.findIndex((candidate) => candidate.timestamp > segment.timestamp);
+  }
+
+  async getNextSegment(segment: DashSegment, options: SegmentRetrievalOptions) {
     let isLazy = !!options.skipLiveWait && this.getRemainingWaitTimeMs() > 0;
 
     while (true) {
-      if (nextIndex < this.segments.length) {
+      const nextIndex = this.getNextSegmentIndex(segment);
+      if (nextIndex !== -1 && nextIndex < this.segments.length) {
         return this.segments[nextIndex]!;
       }
 
@@ -541,7 +571,8 @@ export class DashSegmentedInput {
 
       const firstPacket = await nextTrack._backing.getFirstPacket(options);
       if (!firstPacket) {
-        return null;
+        currentSegment = nextSegment;
+        continue;
       }
 
       return this.createAdjustedPacket(firstPacket, nextSegment, nextTrack);
