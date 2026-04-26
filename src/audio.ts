@@ -49,7 +49,7 @@ export const getDolbyDigitalPlusComplexityIndex = (
 ) => {
   const targetScheme = 'tag:dolby.com,2018:dash:EC3_ExtensionComplexityIndex:2018';
   for (const prop of supplementalProps)
-    if (prop.schemeIdUri === targetScheme) return parseInt(prop.value!);
+    if (prop.schemeIdUri === targetScheme && prop.value) return parseInt(prop.value);
 };
 
 export const checkIsDescriptive = (

@@ -97,7 +97,7 @@ export const getDashTrackMatchKey = (track: DashParsedTrack) =>
     extension: track.extension,
   });
 
-export const getSourcePath = (source: Source): string | undefined => {
+const getSourcePath = (source: Source): string | undefined => {
   if ('rootPath' in source && typeof source.rootPath === 'string') {
     return source.rootPath;
   }

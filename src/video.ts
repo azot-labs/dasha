@@ -28,7 +28,7 @@ const MATRIX = {
   ICtCp_BT_2100: 14,
 };
 
-export const parseVideoCodecFromMime = (mime: string): VideoCodec => {
+const parseVideoCodecFromMime = (mime: string): VideoCodec => {
   const target = mime.toLowerCase().trim().split('.')[0];
   const avc = ['avc1', 'avc2', 'avc3', 'dva1', 'dvav'];
   const hevc = ['hev1', 'hev2', 'hev3', 'hvc1', 'hvc2', 'hvc3', 'dvh1', 'dvhe', 'lhv1', 'lhe1'];
@@ -45,7 +45,7 @@ export const parseVideoCodecFromMime = (mime: string): VideoCodec => {
   throw new Error(`The MIME ${mime} is not supported as video codec`);
 };
 
-export const parseDynamicRangeFromCicp = (
+const parseDynamicRangeFromCicp = (
   primaries: number,
   transfer: number,
   matrix: number,
@@ -71,12 +71,12 @@ export const parseDynamicRangeFromCicp = (
   }
 };
 
-export const parseVideoCodec = (codecs: string) => {
+const parseVideoCodec = (codecs: string) => {
   for (const codec of codecs.toLowerCase().split(',')) {
     const mime = codec.trim().split('.')[0];
     try {
       return parseVideoCodecFromMime(mime);
-    } catch (e) {
+    } catch {
       continue;
     }
   }
@@ -86,7 +86,7 @@ export const parseVideoCodec = (codecs: string) => {
 export const tryParseVideoCodec = (codecs: string) => {
   try {
     return parseVideoCodec(codecs);
-  } catch (e) {
+  } catch {
     return undefined;
   }
 };
@@ -105,7 +105,7 @@ export const parseDynamicRange = (
   const getValues = (schemeIdUri: string) =>
     allProps
       .filter((prop) => prop.schemeIdUri === schemeIdUri)
-      .map((prop) => parseInt(prop.value!));
+      .flatMap((prop) => (prop.value ? [parseInt(prop.value)] : []));
   const primaries = getValues(primariesScheme).reduce((acc, current) => acc + current, 0);
   const transfer = getValues(transferScheme).reduce((acc, current) => acc + current, 0);
   const matrix = getValues(matrixScheme).reduce((acc, current) => acc + current, 0);
