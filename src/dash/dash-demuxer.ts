@@ -1,6 +1,6 @@
 import { DOMParser, type Element } from '@xmldom/xmldom';
 import { Temporal } from 'temporal-polyfill';
-import { InputFormat } from 'mediabunny';
+import { ADTS, InputFormat, MATROSKA, MP3, MP4, QTFF, WEBM } from 'mediabunny';
 import type {
   AudioCodec,
   DurationMetadataRequestOptions,
@@ -1221,12 +1221,25 @@ export class DashDemuxer {
 
 abstract class DashTrackBackingBase {
   internalTrack: InternalTrack;
+  hydratedTrackPromise: Promise<any> | null = null;
 
   constructor(internalTrack: InternalTrack) {
     this.internalTrack = internalTrack;
   }
 
   abstract getType(): 'video' | 'audio' | 'subtitle';
+
+  hydrate() {
+    return (this.hydratedTrackPromise ??= this.getSegmentedInput().getFirstTrack());
+  }
+
+  delegate<T>(fn: (track: any) => T | Promise<T>) {
+    if (this.hydratedTrackPromise) {
+      return this.hydratedTrackPromise.then(fn);
+    }
+
+    return this.hydrate().then(fn);
+  }
 
   getId() {
     return this.internalTrack.id;
@@ -1253,7 +1266,7 @@ abstract class DashTrackBackingBase {
   }
 
   getTimeResolution() {
-    return 1;
+    return this.delegate((track) => track.getTimeResolution());
   }
 
   isRelativeToUnixEpoch() {
@@ -1296,31 +1309,31 @@ abstract class DashTrackBackingBase {
   }
 
   async getDecoderConfig() {
-    return null;
+    return this.getSegmentedInput().getDecoderConfig();
   }
 
   getMetadataCodecParameterString() {
     return this.internalTrack.track.codecString;
   }
 
-  async getFirstPacket(_options: PacketRetrievalOptions) {
-    return null;
+  async getFirstPacket(options: PacketRetrievalOptions) {
+    return this.getSegmentedInput().getFirstPacket(options);
   }
 
-  async getPacket(_timestamp: number, _options: PacketRetrievalOptions) {
-    return null;
+  async getPacket(timestamp: number, options: PacketRetrievalOptions) {
+    return this.getSegmentedInput().getPacket(timestamp, options);
   }
 
-  async getNextPacket(_packet: EncodedPacket, _options: PacketRetrievalOptions) {
-    return null;
+  async getNextPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
+    return this.getSegmentedInput().getNextPacket(packet, options);
   }
 
-  async getKeyPacket(_timestamp: number, _options: PacketRetrievalOptions) {
-    return null;
+  async getKeyPacket(timestamp: number, options: PacketRetrievalOptions) {
+    return this.getSegmentedInput().getKeyPacket(timestamp, options);
   }
 
-  async getNextKeyPacket(_packet: EncodedPacket, _options: PacketRetrievalOptions) {
-    return null;
+  async getNextKeyPacket(packet: EncodedPacket, options: PacketRetrievalOptions) {
+    return this.getSegmentedInput().getNextKeyPacket(packet, options);
   }
 
   getSegmentedInput() {
@@ -1347,23 +1360,31 @@ class DashInputVideoTrackBacking extends DashTrackBackingBase {
   }
 
   override getCodec(): VideoCodec | null {
-    return this.internalTrack.track.codec as VideoCodec | null;
+    return (this.internalTrack.track.codec as VideoCodec | null) ?? null;
   }
 
   getCodedWidth() {
-    return this.internalTrack.info.width ?? 0;
+    return this.internalTrack.info.width ?? this.delegate((track) => track.getCodedWidth());
   }
 
   getCodedHeight() {
-    return this.internalTrack.info.height ?? 0;
+    return this.internalTrack.info.height ?? this.delegate((track) => track.getCodedHeight());
   }
 
   getSquarePixelWidth() {
-    return this.internalTrack.info.width ?? 0;
+    return this.internalTrack.info.width ?? this.delegate((track) => track.getSquarePixelWidth());
   }
 
   getSquarePixelHeight() {
-    return this.internalTrack.info.height ?? 0;
+    return this.internalTrack.info.height ?? this.delegate((track) => track.getSquarePixelHeight());
+  }
+
+  getMetadataDisplayWidth() {
+    return this.internalTrack.info.width;
+  }
+
+  getMetadataDisplayHeight() {
+    return this.internalTrack.info.height;
   }
 
   getRotation() {
@@ -1371,11 +1392,11 @@ class DashInputVideoTrackBacking extends DashTrackBackingBase {
   }
 
   async getColorSpace(): Promise<VideoColorSpaceInit> {
-    return {};
+    return this.delegate((track) => track.getColorSpace());
   }
 
   async canBeTransparent() {
-    return false;
+    return this.delegate((track) => track.canBeTransparent());
   }
 }
 
@@ -1392,15 +1413,15 @@ class DashInputAudioTrackBacking extends DashTrackBackingBase {
   }
 
   override getCodec(): AudioCodec | null {
-    return this.internalTrack.track.codec as AudioCodec | null;
+    return (this.internalTrack.track.codec as AudioCodec | null) ?? null;
   }
 
   getNumberOfChannels() {
-    return this.internalTrack.info.numberOfChannels ?? 0;
+    return this.internalTrack.info.numberOfChannels ?? this.delegate((track) => track.getNumberOfChannels());
   }
 
   getSampleRate() {
-    return this.internalTrack.track.sampleRate ?? 0;
+    return this.internalTrack.track.sampleRate ?? this.delegate((track) => track.getSampleRate());
   }
 }
 
@@ -1437,7 +1458,7 @@ const createTrackBackings = (internalTracks: InternalTrack[]) =>
 
 export class DashInputFormat extends InputFormat {
   get name() {
-    return 'dash';
+    return 'Dynamic Adaptive Streaming over HTTP (DASH)';
   }
 
   get mimeType() {
@@ -1461,4 +1482,4 @@ export class DashInputFormat extends InputFormat {
 }
 
 export const DASH = new DashInputFormat();
-export const DASH_FORMATS: InputFormat[] = [DASH];
+export const DASH_FORMATS: InputFormat[] = [DASH, MP4, QTFF, WEBM, MATROSKA, MP3, ADTS];
