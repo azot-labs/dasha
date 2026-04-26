@@ -1165,9 +1165,10 @@ export class DashDemuxer {
     let matchingTracks = nextTracks.filter(
       (candidate) => getDashTrackMatchKey(candidate) === getDashTrackMatchKey(currentTrack),
     );
-    if (!matchingTracks.length) {
+    const currentInitSegmentUrl = currentTrack.initSegment?.url;
+    if (!matchingTracks.length && currentInitSegmentUrl) {
       matchingTracks = nextTracks.filter(
-        (candidate) => candidate.initSegment?.url === currentTrack.initSegment?.url,
+        (candidate) => candidate.initSegment?.url === currentInitSegmentUrl,
       );
     }
 
@@ -1196,6 +1197,7 @@ export class DashDemuxer {
 
       track.isLive = nextTrack.isLive;
       track.refreshIntervalMs = nextTrack.refreshIntervalMs;
+      track.periodId = nextTrack.periodId;
       track.initSegment = nextTrack.initSegment;
       track.mediaSegments = nextTrack.mediaSegments;
       track.audioGroupId = nextTrack.audioGroupId;
