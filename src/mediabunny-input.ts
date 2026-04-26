@@ -8,7 +8,7 @@ import type {
   Source,
 } from 'mediabunny';
 import type { HlsSegment, HlsSegmentedInput, InputTrackWithBacking } from './mediabunny';
-import type { DashSegment, DashSegmentedInput } from './dash';
+import type { DashSegment, DashSegmentedInput } from './dash/dash-segmented-input';
 import type { InputTrackQuery } from 'mediabunny';
 
 declare module 'mediabunny' {

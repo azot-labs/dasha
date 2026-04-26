@@ -28,7 +28,7 @@ const parseAudioCodec = (codecs: string) => {
   for (const mime of mimes) {
     try {
       return parseAudioCodecFromMime(mime);
-    } catch (e) {
+    } catch {
       continue;
     }
   }
@@ -38,7 +38,7 @@ const parseAudioCodec = (codecs: string) => {
 export const tryParseAudioCodec = (codecs: string) => {
   try {
     return parseAudioCodec(codecs);
-  } catch (e) {
+  } catch {
     return undefined;
   }
 };
@@ -49,7 +49,7 @@ export const getDolbyDigitalPlusComplexityIndex = (
 ) => {
   const targetScheme = 'tag:dolby.com,2018:dash:EC3_ExtensionComplexityIndex:2018';
   for (const prop of supplementalProps)
-    if (prop.schemeIdUri === targetScheme) return parseInt(prop.value!);
+    if (prop.schemeIdUri === targetScheme && prop.value) return parseInt(prop.value);
 };
 
 export const checkIsDescriptive = (

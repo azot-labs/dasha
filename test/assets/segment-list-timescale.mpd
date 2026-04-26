@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT8S" minBufferTime="PT1.5S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4" contentType="video">
+      <Representation id="main" bandwidth="449000" width="482" height="270">
+        <BaseURL>https://www.example.com/high/</BaseURL>
+        <SegmentList startNumber="1" timescale="9000" duration="18000">
+          <Initialization sourceURL="init.mp4" />
+          <SegmentURL media="s1.m4s" />
+          <SegmentURL media="s2.m4s" />
+          <SegmentURL media="s3.m4s" />
+          <SegmentURL media="s4.m4s" />
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

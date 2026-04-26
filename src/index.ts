@@ -1,8 +1,8 @@
 import { FilePathSource, UrlSource, HLS_FORMATS, desc, asc, prefer } from 'mediabunny';
 import type { InputFormat, InputOptions as MediabunnyInputOptions, Source } from 'mediabunny';
 import type { HlsSegmentedInput, HlsSegment, InputTrackWithBacking } from './mediabunny';
-import { DASH, DASH_FORMATS } from './dash';
-import type { DashSegment, DashSegmentedInput } from './dash';
+import { DASH, DASH_FORMATS } from './dash/dash-demuxer';
+import type { DashSegment, DashSegmentedInput } from './dash/dash-segmented-input';
 import {
   SegmentedMediabunnyInput,
   type MediabunnyAudioTrackWithSegments,

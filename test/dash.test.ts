@@ -2,7 +2,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { InputFormat } from 'mediabunny';
 import { expect, test } from 'vitest';
-import { DASH, DASH_FORMATS, Input, UrlSource, desc, isInput } from '../dasha';
+import { DASH, DASH_FORMATS, Input, UrlSource, desc, isInput } from '../src';
 
 test('parse dash with the mediabunny-like input API', async () => {
   expect(DASH).toBeInstanceOf(InputFormat);

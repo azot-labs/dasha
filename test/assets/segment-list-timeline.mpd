@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT73S" minBufferTime="PT2S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4" segmentAlignment="true">
+      <Representation id="timeline-video" bandwidth="3971000" codecs="avc1.64001e" width="720" height="404">
+        <BaseURL>https://www.example.com/high/video.mp4</BaseURL>
+        <SegmentList presentationTimeOffset="10">
+          <Initialization range="0-99"/>
+          <SegmentTimeline>
+            <S d="10" t="50"/>
+            <S d="5"/>
+            <S d="8"/>
+          </SegmentTimeline>
+          <SegmentURL media="segment-1.ts" mediaRange="100-199"/>
+          <SegmentURL media="segment-2.ts" mediaRange="200-249"/>
+          <SegmentURL media="segment-3.ts" mediaRange="250-329"/>
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

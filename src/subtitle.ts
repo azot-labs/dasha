@@ -29,7 +29,7 @@ const parseSubtitleCodec = (codecs: string) => {
   for (const mime of mimes) {
     try {
       return parseSubtitleCodecFromMime(mime);
-    } catch (e) {
+    } catch {
       continue;
     }
   }
@@ -39,7 +39,7 @@ const parseSubtitleCodec = (codecs: string) => {
 export const tryParseSubtitleCodec = (codecs: string) => {
   try {
     return parseSubtitleCodec(codecs);
-  } catch (e) {
+  } catch {
     return undefined;
   }
 };
@@ -58,16 +58,6 @@ export const checkIsSdh = (accessibilities: { schemeIdUri: string; value?: strin
     const { schemeIdUri, value } = accessibility;
     const isSdh = schemeIdUri === 'urn:tva:metadata:cs:AudioPurposeCS:2007' && value === '2';
     if (isSdh) return true;
-  }
-  return false;
-};
-
-export const checkIsForced = (roles: { schemeIdUri: string; value?: string }[] = []) => {
-  for (const role of roles) {
-    const isForced =
-      role.schemeIdUri === 'urn:mpeg:dash:role:2011' &&
-      (role.value === 'forced-subtitle' || role.value === 'forced_subtitle');
-    if (isForced) return true;
   }
   return false;
 };

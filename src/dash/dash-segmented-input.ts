@@ -1,15 +1,11 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { EncryptInfo } from '../shared/encrypt-info';
-import { ENCRYPT_METHODS } from '../shared/encrypt-method';
-import type { MediaSegment } from '../shared/media-segment';
-import type { Playlist } from '../shared/playlist';
-import type { DashInternalTrack } from './dash-track-backing';
+import type { DashEncryptionData, DashParsedSegment } from './dash-misc';
+import type { DashInternalTrack } from './dash-demuxer';
 
 export type Segment = {
   timestamp: number;
   duration: number;
   relativeToUnixEpoch: boolean;
-  firstSegment: DashSegment | null;
 };
 
 export type DashSegmentLocation = {
@@ -18,12 +14,7 @@ export type DashSegmentLocation = {
   length: number | null;
 };
 
-export type DashEncryptionInfo = {
-  method: string;
-  key: Uint8Array | undefined;
-  iv: Uint8Array | undefined;
-  drm: EncryptInfo['drm'];
-};
+export type DashEncryptionInfo = DashEncryptionData;
 
 export type DashSegment = Segment & {
   sequenceNumber: number | null;
@@ -34,72 +25,54 @@ export type DashSegment = Segment & {
   lastProgramDateTimeSeconds: number | null;
 };
 
-const getSegmentLocation = (segment: MediaSegment): DashSegmentLocation => ({
+const getSegmentLocation = (segment: DashParsedSegment): DashSegmentLocation => ({
   path: segment.url,
   offset: segment.startRange ?? 0,
   length: segment.expectLength ?? null,
 });
 
-const getSegmentEncryption = (encryptInfo: EncryptInfo): DashEncryptionInfo | null => {
-  if (
-    encryptInfo.method === ENCRYPT_METHODS.NONE ||
-    encryptInfo.method === ENCRYPT_METHODS.UNKNOWN
-  ) {
-    return null;
-  }
-
-  return {
-    method: encryptInfo.method,
-    key: encryptInfo.key,
-    iv: encryptInfo.iv,
-    drm: encryptInfo.drm,
-  };
-};
-
 const createInitSegment = (
-  segment: MediaSegment,
+  segment: DashParsedSegment,
   firstSegment: DashSegment | null,
 ): DashSegment => ({
   timestamp: 0,
   duration: 0,
   relativeToUnixEpoch: false,
   firstSegment,
-  sequenceNumber: Number.isFinite(segment.index) ? segment.index : null,
+  sequenceNumber: segment.sequenceNumber,
   location: getSegmentLocation(segment),
-  encryption: getSegmentEncryption(segment.encryptInfo),
+  encryption: segment.encryption,
   initSegment: null,
   lastProgramDateTimeSeconds: null,
 });
 
-const flattenSegments = (playlist?: Playlist) =>
-  playlist?.mediaParts.flatMap((part) => part.mediaSegments) ?? [];
-
-export const playlistToDashSegments = (playlist?: Playlist): DashSegment[] => {
-  const mediaSegments = flattenSegments(playlist);
+const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] => {
+  const mediaSegments = internalTrack.track.mediaSegments;
   if (mediaSegments.length === 0) return [];
 
-  let timestamp = 0;
+  let nextTimestamp = 0;
   const segments: DashSegment[] = [];
 
   for (const mediaSegment of mediaSegments) {
+    const timestamp = mediaSegment.timestamp ?? nextTimestamp;
     const dashSegment: DashSegment = {
       timestamp,
       duration: mediaSegment.duration,
       relativeToUnixEpoch: false,
       firstSegment: null,
-      sequenceNumber: Number.isFinite(mediaSegment.index) ? mediaSegment.index : null,
+      sequenceNumber: mediaSegment.sequenceNumber,
       location: getSegmentLocation(mediaSegment),
-      encryption: getSegmentEncryption(mediaSegment.encryptInfo),
+      encryption: mediaSegment.encryption,
       initSegment: null,
       lastProgramDateTimeSeconds: null,
     };
     segments.push(dashSegment);
-    timestamp += mediaSegment.duration;
+    nextTimestamp = timestamp + mediaSegment.duration;
   }
 
   const firstSegment = segments[0] ?? null;
-  const initSegment = playlist?.mediaInit
-    ? createInitSegment(playlist.mediaInit, firstSegment)
+  const initSegment = internalTrack.track.initSegment
+    ? createInitSegment(internalTrack.track.initSegment, firstSegment)
     : null;
 
   for (const segment of segments) {
@@ -111,11 +84,16 @@ export const playlistToDashSegments = (playlist?: Playlist): DashSegment[] => {
 };
 
 export class DashSegmentedInput {
+  internalTrack: DashInternalTrack;
+  demuxer: DashInternalTrack['demuxer'];
   segments: DashSegment[] = [];
   currentUpdateSegmentsPromise: Promise<void> | null = null;
   lastSegmentUpdateTime = -Infinity;
 
-  constructor(readonly internalTrack: DashInternalTrack) {}
+  constructor(internalTrack: DashInternalTrack) {
+    this.internalTrack = internalTrack;
+    this.demuxer = internalTrack.demuxer;
+  }
 
   runUpdateSegments() {
     return (this.currentUpdateSegmentsPromise ??= (async () => {
@@ -126,23 +104,31 @@ export class DashSegmentedInput {
         }
 
         this.lastSegmentUpdateTime = performance.now();
-        await this.internalTrack.demuxer.refreshTrackSegments(this.internalTrack);
-        this.segments = playlistToDashSegments(this.internalTrack.streamInfo.playlist);
+        await this.updateSegments();
       } finally {
         this.currentUpdateSegmentsPromise = null;
       }
     })());
   }
 
+  async updateSegments() {
+    await this.demuxer.refreshTrackSegments(this.internalTrack);
+    this.segments = trackToDashSegments(this.internalTrack);
+  }
+
   getRemainingWaitTimeMs() {
-    const playlist = this.internalTrack.streamInfo.playlist;
-    if (!playlist?.isLive) {
+    if (!this.internalTrack.track.isLive) {
       return 0;
     }
 
     const elapsed = performance.now() - this.lastSegmentUpdateTime;
-    const result = Math.max(0, playlist.refreshIntervalMs - elapsed);
-    return result <= 50 ? 0 : result;
+    const result = Math.max(0, this.internalTrack.track.refreshIntervalMs - elapsed);
+    if (result <= 50) {
+      // Match HLS behaviour: skip tiny waits to avoid timing races around live refreshes.
+      return 0;
+    }
+
+    return result;
   }
 
   async getLiveRefreshInterval() {
@@ -150,11 +136,8 @@ export class DashSegmentedInput {
       await this.runUpdateSegments();
     }
 
-    const playlist = this.internalTrack.streamInfo.playlist;
-    if (!playlist?.isLive) {
-      return null;
-    }
-
-    return playlist.refreshIntervalMs / 1000;
+    return this.internalTrack.track.isLive
+      ? this.internalTrack.track.refreshIntervalMs / 1000
+      : null;
   }
 }
