@@ -13,6 +13,7 @@ import type { InputTrackQuery } from 'mediabunny';
 
 declare module 'mediabunny' {
   interface Input<S extends Source = Source> {
+    _getTrackBackings(): Promise<unknown[]>;
     _wrapBackingAsTrack(backing: unknown): MediabunnyInputTrack;
   }
 }
@@ -27,6 +28,9 @@ export type MediabunnyVideoTrackWithSegments = MediabunnyInputVideoTrack & Segme
 export type MediabunnyAudioTrackWithSegments = MediabunnyInputAudioTrack & SegmentAccessMethods;
 
 type TrackBacking = Parameters<MediabunnyInput<Source>['_wrapBackingAsTrack']>[0];
+type InternalInput<S extends Source = Source> = MediabunnyInput<S> & {
+  _getTrackBackings(): Promise<TrackBacking[]>;
+};
 
 type SegmentableBacking = {
   getType(): string;
@@ -42,6 +46,97 @@ const requireSync = <T>(value: T | Promise<T>, getterName: string, asyncName: st
     );
   }
   return value;
+};
+
+const queryTracks = async <T extends MediabunnyInputTrack>(
+  tracks: T[],
+  query?: InputTrackQuery<T>,
+): Promise<T[]> => {
+  let matched = tracks;
+  if (query?.filter) {
+    const filterMatches = tracks.map((track) => query.filter!(track));
+    const resolvedFilterMatches = await Promise.all(filterMatches);
+    matched = tracks.filter((_, index) => resolvedFilterMatches[index]);
+  }
+
+  if (!query?.sortBy) {
+    return matched;
+  }
+
+  const resolvedSortValues = await Promise.all(matched.map((track) => query.sortBy!(track)));
+  return matched
+    .map((track, index) => ({ track, sortValue: resolvedSortValues[index] }))
+    .sort((left, right) => {
+      const leftValues = Array.isArray(left.sortValue) ? left.sortValue : [left.sortValue];
+      const rightValues = Array.isArray(right.sortValue) ? right.sortValue : [right.sortValue];
+      const maxLength = Math.max(leftValues.length, rightValues.length);
+      for (let index = 0; index < maxLength; index++) {
+        const leftValue = leftValues[index] ?? 0;
+        const rightValue = rightValues[index] ?? 0;
+        if (leftValue === rightValue) {
+          continue;
+        }
+        return leftValue - rightValue;
+      }
+      return 0;
+    })
+    .map(({ track }) => track);
+};
+
+const BACKING_TYPE_SUBTITLE = 'subtitle';
+const BACKING_TYPE_AUDIO = 'audio';
+const BACKING_TYPE_VIDEO = 'video';
+const BASE_INPUT_PATCHED = Symbol.for('dasha.base-mediabunny-input-patched');
+
+const getBackingType = (backing: TrackBacking) => (backing as SegmentableBacking).getType?.();
+
+const queryWrappedTracks = <T extends MediabunnyInputTrack>(
+  input: InternalInput,
+  backings: TrackBacking[],
+  query?: InputTrackQuery<T>,
+) => {
+  const tracks = backings.map((backing) => input._wrapBackingAsTrack(backing)) as T[];
+  return queryTracks(tracks, query);
+};
+
+const getTrackBackingsByType = async (
+  input: InternalInput,
+  type?: typeof BACKING_TYPE_VIDEO | typeof BACKING_TYPE_AUDIO | typeof BACKING_TYPE_SUBTITLE,
+) => {
+  const backings = await input._getTrackBackings();
+  if (!type) {
+    return backings;
+  }
+
+  return backings.filter((backing) => getBackingType(backing) === type);
+};
+
+const patchBaseMediabunnyInput = () => {
+  const prototype = MediabunnyInput.prototype as typeof MediabunnyInput.prototype & {
+    [BASE_INPUT_PATCHED]?: boolean;
+  };
+
+  if (prototype[BASE_INPUT_PATCHED]) {
+    return;
+  }
+
+  prototype.getTracks = function (query?: InputTrackQuery<MediabunnyInputTrack>) {
+    return getTrackBackingsByType(this as InternalInput).then((backings) =>
+      queryWrappedTracks(
+        this as InternalInput,
+        backings.filter((backing) => getBackingType(backing) !== BACKING_TYPE_SUBTITLE),
+        query,
+      ),
+    );
+  };
+
+  prototype.getAudioTracks = function (query?: InputTrackQuery<MediabunnyInputAudioTrack>) {
+    return getTrackBackingsByType(this as InternalInput, BACKING_TYPE_AUDIO).then((backings) =>
+      queryWrappedTracks(this as InternalInput, backings, query),
+    );
+  };
+
+  prototype[BASE_INPUT_PATCHED] = true;
 };
 
 const getSegmentedInputForTrack = (
@@ -117,9 +212,19 @@ class MediabunnyInputSubtitleTrack extends MediabunnyInputTrack {
   }
 }
 
+patchBaseMediabunnyInput();
+
 export class SegmentedMediabunnyInput<S extends Source = Source> extends MediabunnyInput<S> {
   #trackCache = new WeakMap<MediabunnyInputTrack, MediabunnyTrackWithSegments>();
   #subtitleTrackCache = new WeakMap<object, MediabunnyInputSubtitleTrack>();
+
+  async #queryTracks<T extends MediabunnyInputTrack>(
+    query: InputTrackQuery<T> | undefined,
+    type?: typeof BACKING_TYPE_VIDEO | typeof BACKING_TYPE_AUDIO | typeof BACKING_TYPE_SUBTITLE,
+  ) {
+    const backings = await getTrackBackingsByType(this as InternalInput<S>, type);
+    return queryWrappedTracks(this as InternalInput<S>, backings, query);
+  }
 
   override _wrapBackingAsTrack(backing: TrackBacking): MediabunnyTrackWithSegments {
     const track =
@@ -144,15 +249,15 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
   }
 
   override async getTracks(query?: InputTrackQuery<MediabunnyTrackWithSegments>) {
-    return (await super.getTracks(query as never)) as MediabunnyTrackWithSegments[];
+    return (await this.#queryTracks(query)) as MediabunnyTrackWithSegments[];
   }
 
   override async getVideoTracks(query?: InputTrackQuery<MediabunnyVideoTrackWithSegments>) {
-    return (await super.getVideoTracks(query as never)) as MediabunnyVideoTrackWithSegments[];
+    return (await this.#queryTracks(query, BACKING_TYPE_VIDEO)) as MediabunnyVideoTrackWithSegments[];
   }
 
   override async getAudioTracks(query?: InputTrackQuery<MediabunnyAudioTrackWithSegments>) {
-    return (await super.getAudioTracks(query as never)) as MediabunnyAudioTrackWithSegments[];
+    return (await this.#queryTracks(query, BACKING_TYPE_AUDIO)) as MediabunnyAudioTrackWithSegments[];
   }
 
   override async getPrimaryVideoTrack(query?: InputTrackQuery<MediabunnyVideoTrackWithSegments>) {
