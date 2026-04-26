@@ -58,7 +58,6 @@
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.10",
-    "barsic": "^0.2.0",
     "mediabunny": "1.42.0-beta.7",
     "temporal-polyfill": "^0.3.2"
   },

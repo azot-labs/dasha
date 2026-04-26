@@ -88,7 +88,6 @@ export const getDashTrackMatchKey = (track: DashParsedTrack) =>
     type: track.type,
     codecString: track.codecString,
     groupId: track.groupId,
-    periodId: track.periodId,
     width: track.type === 'video' ? track.width : null,
     height: track.type === 'video' ? track.height : null,
     languageCode: track.languageCode ?? null,
