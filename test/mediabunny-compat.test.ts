@@ -7,7 +7,7 @@ import {
   UrlSource,
 } from 'mediabunny';
 import { expect, test } from 'vitest';
-import { DASH_FORMATS } from '../src';
+import { DASH_FORMATS, preserveSubtitleBackingsOnInput } from '../src';
 import { assetFileUrl } from './utils';
 
 test('plain mediabunny Input does not expose DASH subtitles as audio tracks', async () => {
@@ -22,6 +22,25 @@ test('plain mediabunny Input does not expose DASH subtitles as audio tracks', as
   expect(audioTracks).toHaveLength(3);
   expect(languages).toEqual(['en', 'en-AU', 'et-ET']);
   expect(languages).not.toContain('ru');
+});
+
+test('preserveSubtitleBackingsOnInput opts internal inputs out of subtitle filtering', async () => {
+  const subtitleTrack = { type: 'subtitle' };
+  const input = Object.assign(Object.create(MediabunnyInput.prototype), {
+    _getTrackBackings: async () => [
+      { getType: () => 'audio' },
+      { getType: () => 'subtitle' },
+    ],
+    _wrapBackingAsTrack(backing: { getType(): string }) {
+      return backing.getType() === 'subtitle' ? subtitleTrack : { type: backing.getType() };
+    },
+  }) as MediabunnyInput;
+
+  expect(await input.getTracks()).toEqual([{ type: 'audio' }]);
+
+  preserveSubtitleBackingsOnInput(input);
+
+  expect(await input.getTracks()).toEqual([{ type: 'audio' }, subtitleTrack]);
 });
 
 test('conversion track selection ignores DASH subtitles on plain mediabunny Input', async () => {

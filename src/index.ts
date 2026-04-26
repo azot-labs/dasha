@@ -8,6 +8,7 @@ import {
   type MediabunnyAudioTrackWithSegments,
   type MediabunnyTrackWithSegments,
   type MediabunnyVideoTrackWithSegments,
+  preserveSubtitleBackingsOnInput,
 } from './mediabunny-input';
 
 type DashaInputOptions<S extends Source = Source> = Omit<MediabunnyInputOptions<S>, 'formats'> & {
@@ -35,6 +36,7 @@ export const getSegments = async (track: InputTrack): Promise<InputSegment[]> =>
   track.getSegments();
 
 export { FilePathSource, UrlSource, HLS_FORMATS, DASH, DASH_FORMATS, desc, asc, prefer };
+export { preserveSubtitleBackingsOnInput };
 export type {
   HlsSegment,
   HlsSegmentedInput,

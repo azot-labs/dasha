@@ -10,6 +10,7 @@ import {
   type SourceRef,
   type SourceRequest,
 } from 'mediabunny';
+import { preserveSubtitleBackingsOnInput } from '../mediabunny-input';
 import { DASH_MIME_TYPE, type DashEncryptionData, type DashParsedSegment } from './dash-misc';
 import type { DashInternalTrack } from './dash-demuxer';
 
@@ -348,7 +349,7 @@ export class DashSegmentedInput {
       ...input._formatOptions,
     };
 
-    const segmentInput = new MediabunnyInput({
+    const segmentInput = preserveSubtitleBackingsOnInput(new MediabunnyInput({
       source: new CustomPathedSource(segment.location.path, async (request) => {
         if (!request.isRoot) {
           throw new Error('Nested requests are not supported for DASH segments.');
@@ -377,7 +378,7 @@ export class DashSegmentedInput {
       formats: input._formats.filter((format) => format.mimeType !== DASH_MIME_TYPE),
       initInput: initInput ?? undefined,
       formatOptions,
-    });
+    }));
 
     this.inputCache.push({
       age: this.nextInputCacheAge++,

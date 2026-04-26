@@ -87,6 +87,7 @@ const BACKING_TYPE_SUBTITLE = 'subtitle';
 const BACKING_TYPE_AUDIO = 'audio';
 const BACKING_TYPE_VIDEO = 'video';
 const BASE_INPUT_PATCHED = Symbol.for('dasha.base-mediabunny-input-patched');
+export const PRESERVE_SUBTITLE_BACKINGS = Symbol.for('dasha.preserve-subtitle-backings');
 
 const getBackingType = (backing: TrackBacking) => (backing as SegmentableBacking).getType?.();
 
@@ -124,7 +125,11 @@ const patchBaseMediabunnyInput = () => {
     return getTrackBackingsByType(this as InternalInput).then((backings) =>
       queryWrappedTracks(
         this as InternalInput,
-        backings.filter((backing) => getBackingType(backing) !== BACKING_TYPE_SUBTITLE),
+        (this as InternalInput & { [PRESERVE_SUBTITLE_BACKINGS]?: boolean })[
+          PRESERVE_SUBTITLE_BACKINGS
+        ]
+          ? backings
+          : backings.filter((backing) => getBackingType(backing) !== BACKING_TYPE_SUBTITLE),
         query,
       ),
     );
@@ -213,6 +218,13 @@ class MediabunnyInputSubtitleTrack extends MediabunnyInputTrack {
 }
 
 patchBaseMediabunnyInput();
+
+export const preserveSubtitleBackingsOnInput = (input: MediabunnyInput) => {
+  Object.assign(input, {
+    [PRESERVE_SUBTITLE_BACKINGS]: true,
+  });
+  return input;
+};
 
 export class SegmentedMediabunnyInput<S extends Source = Source> extends MediabunnyInput<S> {
   #trackCache = new WeakMap<MediabunnyInputTrack, MediabunnyTrackWithSegments>();
