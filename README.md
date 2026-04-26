@@ -4,7 +4,7 @@
 [![npm downloads/month](https://img.shields.io/npm/dm/dasha?style=flat&color=black)](https://www.npmjs.com/package/dasha)
 [![npm downloads](https://img.shields.io/npm/dt/dasha?style=flat&color=black)](https://www.npmjs.com/package/dasha)
 
-Library for working with MPEG-DASH (`.mpd`) and HLS (`.m3u8`) manifests through a mediabunny-compatible `Input` API. Made with the purpose of obtaining a simplified representation convenient for further downloading of segments by URLs.
+Library for working with MPEG-DASH (`.mpd`) and HLS (`.m3u8`) manifests through a mediabunny-compatible `Input` API. Made with the purpose of obtaining a simplified representation convenient for further downloading of segments by URLs and getting basic metadata about the tracks.
 
 > [!WARNING]  
 > This README is for the alpha version. Info about latest stable version is available on [NPM](https://www.npmjs.com/package/dasha/v/3.1.5) or [another GitHub branch](https://github.com/azot-labs/dasha/tree/v3).
