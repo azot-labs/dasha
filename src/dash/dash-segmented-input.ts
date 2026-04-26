@@ -10,6 +10,7 @@ import {
   type SourceRef,
   type SourceRequest,
 } from 'mediabunny';
+import { preserveSubtitleBackingsOnInput } from '../mediabunny-input';
 import { DASH_MIME_TYPE, type DashEncryptionData, type DashParsedSegment } from './dash-misc';
 import type { DashInternalTrack } from './dash-demuxer';
 
@@ -70,8 +71,7 @@ type InternalMediabunnyInput = MediabunnyInput & {
   _getSourceCached(request: SourceRequest): Promise<SourceRef>;
 };
 
-const roundToDivisor = (value: number, multiple: number) =>
-  Math.round(value * multiple) / multiple;
+const roundToDivisor = (value: number, multiple: number) => Math.round(value * multiple) / multiple;
 
 const binarySearchLessOrEqual = <T>(
   array: readonly T[],
@@ -241,7 +241,11 @@ export class DashSegmentedInput {
     let isLazy = !!options.skipLiveWait && this.getRemainingWaitTimeMs() > 0;
 
     while (true) {
-      const index = binarySearchLessOrEqual(this.segments, timestamp, (segment) => segment.timestamp);
+      const index = binarySearchLessOrEqual(
+        this.segments,
+        timestamp,
+        (segment) => segment.timestamp,
+      );
       if (index === -1) {
         return null;
       }
@@ -345,36 +349,36 @@ export class DashSegmentedInput {
       ...input._formatOptions,
     };
 
-    const segmentInput = new MediabunnyInput({
-      source: new CustomPathedSource(
-        segment.location.path,
-        async (request) => {
-          if (!request.isRoot) {
-            throw new Error('Nested requests are not supported for DASH segments.');
-          }
+    const segmentInput = preserveSubtitleBackingsOnInput(new MediabunnyInput({
+      source: new CustomPathedSource(segment.location.path, async (request) => {
+        if (!request.isRoot) {
+          throw new Error('Nested requests are not supported for DASH segments.');
+        }
 
-          const proxiedRequest: SourceRequest = {
-            ...request,
-            isRoot: false,
-          };
+        const proxiedRequest: SourceRequest = {
+          ...request,
+          isRoot: false,
+        };
 
-          let ref: SourceRef = await input._getSourceCached(proxiedRequest);
-          const needsSlice = segment.location.offset > 0 || segment.location.length !== null;
+        let ref: SourceRef = await input._getSourceCached(proxiedRequest);
+        const needsSlice = segment.location.offset > 0 || segment.location.length !== null;
 
-          if (needsSlice) {
-            const slice = ref.source.slice(segment.location.offset, segment.location.length ?? undefined);
-            const sliceRef = slice.ref();
-            ref.free();
-            ref = sliceRef;
-          }
+        if (needsSlice) {
+          const slice = ref.source.slice(
+            segment.location.offset,
+            segment.location.length ?? undefined,
+          );
+          const sliceRef = slice.ref();
+          ref.free();
+          ref = sliceRef;
+        }
 
-          return ref;
-        },
-      ),
+        return ref;
+      }),
       formats: input._formats.filter((format) => format.mimeType !== DASH_MIME_TYPE),
       initInput: initInput ?? undefined,
       formatOptions,
-    });
+    }));
 
     this.inputCache.push({
       age: this.nextInputCacheAge++,
@@ -484,10 +488,7 @@ export class DashSegmentedInput {
     const segmentTimestampRelativeToFirst = segment.timestamp - firstSegment.timestamp;
 
     const modified = packet.clone({
-      timestamp: roundToDivisor(
-        packet.timestamp + mediaOffset,
-        await track.getTimeResolution(),
-      ),
+      timestamp: roundToDivisor(packet.timestamp + mediaOffset, await track.getTimeResolution()),
       sequenceNumber: Math.floor(1e8 * segmentTimestampRelativeToFirst) + packet.sequenceNumber,
     });
 
