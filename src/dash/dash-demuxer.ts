@@ -1419,7 +1419,10 @@ class DashInputAudioTrackBacking extends DashTrackBackingBase {
   }
 
   getNumberOfChannels() {
-    return this.internalTrack.info.numberOfChannels ?? this.delegate((track) => track.getNumberOfChannels());
+    return (
+      this.internalTrack.info.numberOfChannels ??
+      this.delegate((track) => track.getNumberOfChannels())
+    );
   }
 
   getSampleRate() {

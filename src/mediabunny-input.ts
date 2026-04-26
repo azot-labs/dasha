@@ -253,11 +253,17 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
   }
 
   override async getVideoTracks(query?: InputTrackQuery<MediabunnyVideoTrackWithSegments>) {
-    return (await this.#queryTracks(query, BACKING_TYPE_VIDEO)) as MediabunnyVideoTrackWithSegments[];
+    return (await this.#queryTracks(
+      query,
+      BACKING_TYPE_VIDEO,
+    )) as MediabunnyVideoTrackWithSegments[];
   }
 
   override async getAudioTracks(query?: InputTrackQuery<MediabunnyAudioTrackWithSegments>) {
-    return (await this.#queryTracks(query, BACKING_TYPE_AUDIO)) as MediabunnyAudioTrackWithSegments[];
+    return (await this.#queryTracks(
+      query,
+      BACKING_TYPE_AUDIO,
+    )) as MediabunnyAudioTrackWithSegments[];
   }
 
   override async getPrimaryVideoTrack(query?: InputTrackQuery<MediabunnyVideoTrackWithSegments>) {

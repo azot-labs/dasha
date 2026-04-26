@@ -1,4 +1,11 @@
-import { Conversion, Input as MediabunnyInput, Mp4OutputFormat, NullTarget, Output, UrlSource } from 'mediabunny';
+import {
+  Conversion,
+  Input as MediabunnyInput,
+  Mp4OutputFormat,
+  NullTarget,
+  Output,
+  UrlSource,
+} from 'mediabunny';
 import { expect, test } from 'vitest';
 import { DASH_FORMATS } from '../src';
 import { assetFileUrl } from './utils';

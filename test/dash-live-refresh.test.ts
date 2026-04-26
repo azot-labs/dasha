@@ -2,7 +2,10 @@ import { expect, test } from 'vitest';
 import { DASH_FORMATS, Input, UrlSource } from '../src';
 import { DashDemuxer } from '../src/dash/dash-demuxer';
 
-const createLiveManifest = (periodId: string, audioGroupId = 'audio-1') => `<?xml version="1.0" encoding="UTF-8"?>
+const createLiveManifest = (
+  periodId: string,
+  audioGroupId = 'audio-1',
+) => `<?xml version="1.0" encoding="UTF-8"?>
 <MPD
   xmlns="urn:mpeg:dash:schema:mpd:2011"
   type="dynamic"
