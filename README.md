@@ -4,7 +4,7 @@
 [![npm downloads/month](https://img.shields.io/npm/dm/dasha?style=flat&color=black)](https://www.npmjs.com/package/dasha)
 [![npm downloads](https://img.shields.io/npm/dt/dasha?style=flat&color=black)](https://www.npmjs.com/package/dasha)
 
-Library for working with MPEG-DASH (`.mpd`) and HLS (`.m3u8`) manifests through a mediabunny-compatible `Input` API. Made with the purpose of obtaining a simplified representation convenient for further downloading of segments by URLs and getting basic metadata about the tracks.
+Library for working with MPEG-DASH (`.mpd`) manifests and HLS (`.m3u8`) playlists through a Mediabunny-compatible Input API. Made with the purpose of obtaining a simplified representation convenient for further downloading of segments by URLs and getting basic metadata about the tracks.
 
 ## Install
 
@@ -14,7 +14,9 @@ npm install dasha
 
 ## Usage
 
-### HLS
+### Reading HLS
+
+In the example below, we read the segment information for a specific video track and save it to a file.
 
 ```ts
 import fs from 'node:fs/promises';
@@ -54,7 +56,9 @@ async function saveVideo() {
 };
 ```
 
-### DASH
+### Reading DASH
+
+Everything here is identical to the example above, with the sole exception that an URL to a DASH manifest is used instead of an HLS playlist.
 
 ```ts
 import fs from 'node:fs/promises';
@@ -88,6 +92,34 @@ async function saveDashVideo() {
   }
 }
 ```
+
+### Mediabunny with DASH support
+
+> Only reading is supported
+
+Similar to [downloading an HLS playlist as an MP4](https://github.com/Vanilagy/mediabunny/blob/hls/docs/blog/mediabunny-now-supports-hls.md#downloading-an-hls-playlist-as-an-mp4) you can do this:
+
+```ts
+import { Conversion, FilePathTarget, Mp4OutputFormat, Output, Input, UrlSource } from 'mediabunny';
+import { DASH_FORMATS } from 'dasha';
+
+const input = new Input({
+	source: new UrlSource('https://example.com/manifest.mpd'),
+	formats: DASH_FORMATS,
+});
+
+const output = new Output({
+	format: new Mp4OutputFormat(),
+	target: new FilePathTarget('output.mp4'),
+});
+
+const conversion = await Conversion.init({ input, output });
+await conversion.execute();
+
+// Done
+```
+
+See [reading HLS](https://github.com/Vanilagy/mediabunny/blob/hls/docs/guide/reading-hls.md) guide for more use cases (many things can be used with DASH as well).
 
 ## Credits
 
