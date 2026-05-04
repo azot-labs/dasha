@@ -12,8 +12,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.10
       mediabunny:
-        specifier: 1.42.0
-        version: 1.42.0
+        specifier: '>=1.43.1'
+        version: 1.43.1
       temporal-polyfill:
         specifier: ^0.3.2
         version: 0.3.2
@@ -763,8 +763,8 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  mediabunny@1.42.0:
-    resolution: {integrity: sha512-s9ypTqLi6kbh95gC+YaJlG0PkLvMxu37Q/wO/pFZx0fUCA5Ym5mp+2dWoa83mKQ3Uo18aNlgev5iJ5ESZqWwgQ==}
+  mediabunny@1.43.1:
+    resolution: {integrity: sha512-TuxRDvj2FrQjVZ5Zi1nNJ2NcpRbbc3FpDpNcwWAygeA4ND9w1xICOXnze8XUk0VlFhAMkQPm5Gy+yZL+BJ/Gtg==}
 
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
@@ -1489,7 +1489,7 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  mediabunny@1.42.0:
+  mediabunny@1.43.1:
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.11
       '@types/dom-webcodecs': 0.1.13
