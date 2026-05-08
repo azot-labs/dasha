@@ -18,7 +18,7 @@ test('map DASH accessibility and role metadata to track dispositions', async () 
     visuallyImpaired: true,
   });
 
-  expect(await subtitleTrack!.getCodec()).toBe('vtt');
+  expect(await subtitleTrack!.getCodec()).toBe('webvtt');
   await expect(subtitleTrack!.getDisposition()).resolves.toMatchObject({
     forced: true,
     hearingImpaired: true,

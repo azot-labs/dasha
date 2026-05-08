@@ -37,7 +37,7 @@ test('preserve dash track metadata across video, audio, and subtitles', async ()
 
   const firstSubtitleTrack = subtitleTracks[0];
   expect(firstSubtitleTrack).toBeDefined();
-  expect(await firstSubtitleTrack!.getCodec()).toBe('wvtt');
+  expect(await firstSubtitleTrack!.getCodec()).toBe('webvtt');
   expect(await firstSubtitleTrack!.getCodecParameterString()).toBe('wvtt');
 });
 

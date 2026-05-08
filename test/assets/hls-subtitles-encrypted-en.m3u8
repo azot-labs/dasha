@@ -1,0 +1,11 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:6
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXT-X-KEY:METHOD=AES-128,URI="https://example.com/subs.key"
+#EXTINF:6.0,
+hls-subtitles-en-0001.vtt
+#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI="skd://example"
+#EXTINF:6.0,
+hls-subtitles-en-0002.vtt
+#EXT-X-ENDLIST
