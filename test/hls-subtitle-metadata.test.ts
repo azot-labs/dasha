@@ -72,6 +72,22 @@ test('infer HLS subtitle codecs from subtitle rendition playlists', async () => 
   expect(frenchSegments[1]?.location.path).toBe(assetFileUrl('hls-subtitles-fr-0002.ttml'));
 });
 
+test('infer HLS subtitle codecs from extensionless subtitle segments', async () => {
+  using input = new Input({
+    source: new FilePathSource(assetPath('hls-subtitles-extensionless-master.m3u8')),
+    formats: HLS_FORMATS,
+  });
+
+  const subtitleTrack = (await input.getTracks()).find((track) => track.type === 'subtitle');
+  expect(subtitleTrack).toBeDefined();
+  await expect(subtitleTrack!.getCodec()).resolves.toBe('srt');
+  await expect(subtitleTrack!.getCodecParameterString()).resolves.toBe('srt');
+
+  const segments = await subtitleTrack!.getSegments();
+  expect(segments[0]?.location.path).toBe(assetFileUrl('hls-subtitles-en-plain-0001'));
+  expect(segments[1]?.location.path).toBe(assetFileUrl('hls-subtitles-en-plain-0002'));
+});
+
 test('map HLS subtitle FORCED and SDH metadata to track dispositions', async () => {
   const { subtitleTracks, details } = await getSubtitleDetails();
 

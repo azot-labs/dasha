@@ -274,11 +274,20 @@ const detectSubtitleCodecFromUri = async (source: SourceWithRootPath, uri: strin
   if (lines[0] === '#EXTM3U') {
     for (const line of lines.slice(1)) {
       if (!line.startsWith('#')) {
+        const segmentUri = joinHlsPath(loaded.path, line);
         const fromSegmentPath = parseDetectedSubtitleCodec(
-          inferSubtitleCodecStringFromPath(joinHlsPath(loaded.path, line)),
+          inferSubtitleCodecStringFromPath(segmentUri),
         );
         if (fromSegmentPath) {
           return fromSegmentPath;
+        }
+
+        const loadedSegment = await loadPlaylistText(source, segmentUri);
+        const fromSegmentText = parseDetectedSubtitleCodec(
+          sniffSubtitleCodecFromText(loadedSegment.text),
+        );
+        if (fromSegmentText) {
+          return fromSegmentText;
         }
         continue;
       }
