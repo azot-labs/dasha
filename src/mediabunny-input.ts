@@ -41,7 +41,12 @@ type SegmentableBacking = {
   getNumber(): number;
   getType(): string;
   getCodec(): MediaCodec | null | Promise<MediaCodec | null>;
-  getInternalCodecId?(): string | number | Uint8Array | null | Promise<string | number | Uint8Array | null>;
+  getInternalCodecId?():
+    | string
+    | number
+    | Uint8Array
+    | null
+    | Promise<string | number | Uint8Array | null>;
   getName?(): string | null | Promise<string | null>;
   getLanguageCode?(): string | Promise<string>;
   getTimeResolution?(): number | Promise<number>;

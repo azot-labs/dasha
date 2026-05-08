@@ -37,6 +37,7 @@ export const getSegments = async (track: InputTrack): Promise<InputSegment[]> =>
 
 export { FilePathSource, UrlSource, HLS_FORMATS, DASH, DASH_FORMATS, desc, asc, prefer };
 export { preserveSubtitleBackingsOnInput };
+export type { MediaCodec, SubtitleCodec } from './codec';
 export type {
   HlsSegment,
   HlsSegmentedInput,

@@ -27,10 +27,7 @@ test('plain mediabunny Input does not expose DASH subtitles as audio tracks', as
 test('preserveSubtitleBackingsOnInput opts internal inputs out of subtitle filtering', async () => {
   const subtitleTrack = { type: 'subtitle' };
   const input = Object.assign(Object.create(MediabunnyInput.prototype), {
-    _getTrackBackings: async () => [
-      { getType: () => 'audio' },
-      { getType: () => 'subtitle' },
-    ],
+    _getTrackBackings: async () => [{ getType: () => 'audio' }, { getType: () => 'subtitle' }],
     _wrapBackingAsTrack(backing: { getType(): string }) {
       return backing.getType() === 'subtitle' ? subtitleTrack : { type: backing.getType() };
     },

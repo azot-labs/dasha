@@ -1,0 +1,9 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:6
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXTINF:6.0,
+hls-subtitles-fr-0001.ttml
+#EXTINF:6.0,
+hls-subtitles-fr-0002.ttml
+#EXT-X-ENDLIST

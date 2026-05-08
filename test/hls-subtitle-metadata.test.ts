@@ -36,6 +36,42 @@ test('parse HLS subtitle track codecs and languages from a master playlist', asy
   );
 });
 
+test('infer HLS subtitle codecs from subtitle rendition playlists', async () => {
+  using input = new Input({
+    source: new FilePathSource(assetPath('hls-subtitles-alt-codecs-master.m3u8')),
+    formats: HLS_FORMATS,
+  });
+
+  const subtitleTracks = (await input.getTracks()).filter((track) => track.type === 'subtitle');
+  expect(subtitleTracks).toHaveLength(2);
+
+  const details = await Promise.all(
+    subtitleTracks.map(async (track) => ({
+      track,
+      language: await track.getLanguageCode(),
+      codec: await track.getCodec(),
+      codecString: await track.getCodecParameterString(),
+    })),
+  );
+
+  expect(details).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ language: 'en', codec: 'srt', codecString: 'srt' }),
+      expect.objectContaining({ language: 'fr', codec: 'ttml', codecString: 'ttml' }),
+    ]),
+  );
+
+  const englishTrack = details.find((entry) => entry.language === 'en')!.track;
+  const frenchTrack = details.find((entry) => entry.language === 'fr')!.track;
+
+  const englishSegments = await englishTrack.getSegments();
+  const frenchSegments = await frenchTrack.getSegments();
+  expect(englishSegments[0]?.location.path).toBe(assetFileUrl('hls-subtitles-en-0001.srt'));
+  expect(englishSegments[1]?.location.path).toBe(assetFileUrl('hls-subtitles-en-0002.srt'));
+  expect(frenchSegments[0]?.location.path).toBe(assetFileUrl('hls-subtitles-fr-0001.ttml'));
+  expect(frenchSegments[1]?.location.path).toBe(assetFileUrl('hls-subtitles-fr-0002.ttml'));
+});
+
 test('map HLS subtitle FORCED and SDH metadata to track dispositions', async () => {
   const { subtitleTracks, details } = await getSubtitleDetails();
 
@@ -93,12 +129,8 @@ test('parse HLS subtitle segment urls through getSegments()', async () => {
   expect(forcedSegments).toHaveLength(2);
   expect(englishSegments[0]?.location.path).toBe(assetFileUrl('hls-subtitles-en-0001.vtt'));
   expect(englishSegments[1]?.location.path).toBe(assetFileUrl('hls-subtitles-en-0002.vtt'));
-  expect(forcedSegments[0]?.location.path).toBe(
-    assetFileUrl('hls-subtitles-en-forced-0001.vtt'),
-  );
-  expect(forcedSegments[1]?.location.path).toBe(
-    assetFileUrl('hls-subtitles-en-forced-0002.vtt'),
-  );
+  expect(forcedSegments[0]?.location.path).toBe(assetFileUrl('hls-subtitles-en-forced-0001.vtt'));
+  expect(forcedSegments[1]?.location.path).toBe(assetFileUrl('hls-subtitles-en-forced-0002.vtt'));
 });
 
 test('preserve HLS subtitle encryption metadata on returned segments', async () => {

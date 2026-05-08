@@ -349,36 +349,38 @@ export class DashSegmentedInput {
       ...input._formatOptions,
     };
 
-    const segmentInput = preserveSubtitleBackingsOnInput(new MediabunnyInput({
-      source: new CustomPathedSource(segment.location.path, async (request) => {
-        if (!request.isRoot) {
-          throw new Error('Nested requests are not supported for DASH segments.');
-        }
+    const segmentInput = preserveSubtitleBackingsOnInput(
+      new MediabunnyInput({
+        source: new CustomPathedSource(segment.location.path, async (request) => {
+          if (!request.isRoot) {
+            throw new Error('Nested requests are not supported for DASH segments.');
+          }
 
-        const proxiedRequest: SourceRequest = {
-          ...request,
-          isRoot: false,
-        };
+          const proxiedRequest: SourceRequest = {
+            ...request,
+            isRoot: false,
+          };
 
-        let ref: SourceRef = await input._getSourceCached(proxiedRequest);
-        const needsSlice = segment.location.offset > 0 || segment.location.length !== null;
+          let ref: SourceRef = await input._getSourceCached(proxiedRequest);
+          const needsSlice = segment.location.offset > 0 || segment.location.length !== null;
 
-        if (needsSlice) {
-          const slice = ref.source.slice(
-            segment.location.offset,
-            segment.location.length ?? undefined,
-          );
-          const sliceRef = slice.ref();
-          ref.free();
-          ref = sliceRef;
-        }
+          if (needsSlice) {
+            const slice = ref.source.slice(
+              segment.location.offset,
+              segment.location.length ?? undefined,
+            );
+            const sliceRef = slice.ref();
+            ref.free();
+            ref = sliceRef;
+          }
 
-        return ref;
+          return ref;
+        }),
+        formats: input._formats.filter((format) => format.mimeType !== DASH_MIME_TYPE),
+        initInput: initInput ?? undefined,
+        formatOptions,
       }),
-      formats: input._formats.filter((format) => format.mimeType !== DASH_MIME_TYPE),
-      initInput: initInput ?? undefined,
-      formatOptions,
-    }));
+    );
 
     this.inputCache.push({
       age: this.nextInputCacheAge++,
