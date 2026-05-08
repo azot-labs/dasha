@@ -6,7 +6,9 @@ import type {
   Input as MediabunnyInput,
   TrackDisposition,
 } from 'mediabunny';
+import type { SubtitleCodec } from '../codec';
 import type { HlsSegment, HlsSegmentedInput } from '../mediabunny';
+import { tryParseSubtitleCodec } from '../subtitle';
 
 const TAG_STREAM_INF = '#EXT-X-STREAM-INF:';
 const TAG_MEDIA = '#EXT-X-MEDIA:';
@@ -41,6 +43,8 @@ type SourceWithRootPath = {
 
 type HlsSubtitleMediaTag = {
   autoselect: boolean;
+  codec: SubtitleCodec;
+  codecString: string;
   default: boolean;
   forced: boolean;
   groupId: string;
@@ -50,9 +54,15 @@ type HlsSubtitleMediaTag = {
   uri: string;
 };
 
+type HlsSubtitleMediaTagCandidate = Omit<HlsSubtitleMediaTag, 'codec' | 'codecString'>;
+
 type HlsEncryptionInfo = HlsSegment['encryption'];
 
 const subtitleBackingsCache = new WeakMap<MediabunnyInput, Promise<HlsSubtitleTrackBacking[]>>();
+
+const SRT_HEADER_REGEX =
+  /(?:^|\n)\d+\s*\n(?:\d{2}:)?\d{2}:\d{2}[,.]\d{3}\s+-->\s+(?:\d{2}:)?\d{2}:\d{2}[,.]\d{3}/;
+const TTML_MARKER_REGEX = /<tt(?:\s|>)/i;
 
 const splitPlaylistLines = (text: string) =>
   text
@@ -101,7 +111,8 @@ const joinHlsPath = (basePath: string, relativePath: string) => {
       result = relativePath;
     } else {
       const pathStart = basePath.indexOf('/', protocolIndex + 3);
-      result = pathStart === -1 ? basePath + relativePath : basePath.slice(0, pathStart) + relativePath;
+      result =
+        pathStart === -1 ? basePath + relativePath : basePath.slice(0, pathStart) + relativePath;
     }
   } else {
     const lastSlash = basePath.lastIndexOf('/');
@@ -135,9 +146,41 @@ const joinHlsPath = (basePath: string, relativePath: string) => {
   return prefix + normalized.join('/');
 };
 
-const toSegmentPath = (path: string) => (path.includes('://') ? path : pathToFileURL(path).toString());
+const toSegmentPath = (path: string) =>
+  path.includes('://') ? path : pathToFileURL(path).toString();
 
 const parseAttributeBoolean = (value: string | null) => value?.toUpperCase() === 'YES';
+
+const stripQueryAndHash = (value: string) => value.split('#', 1)[0]?.split('?', 1)[0] ?? '';
+
+const inferSubtitleCodecStringFromPath = (path: string) => {
+  const normalized = stripQueryAndHash(path).toLowerCase();
+
+  if (normalized.endsWith('.webvtt')) return 'webvtt';
+  if (normalized.endsWith('.vtt')) return 'vtt';
+  if (normalized.endsWith('.srt')) return 'srt';
+  if (normalized.endsWith('.ttml')) return 'ttml';
+  if (normalized.endsWith('.dfxp')) return 'dfxp';
+
+  return null;
+};
+
+const parseDetectedSubtitleCodec = (codecString: string | null) => {
+  if (!codecString) return null;
+
+  const codec = tryParseSubtitleCodec(codecString);
+  if (!codec) return null;
+
+  return { codec, codecString };
+};
+
+const sniffSubtitleCodecFromText = (text: string) => {
+  const normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trimStart();
+  if (normalized.startsWith('WEBVTT')) return 'webvtt';
+  if (TTML_MARKER_REGEX.test(normalized)) return 'ttml';
+  if (SRT_HEADER_REGEX.test(normalized)) return 'srt';
+  return null;
+};
 
 class AttributeList {
   #attributes: Record<string, string> = {};
@@ -212,6 +255,65 @@ const loadPlaylistText = async (source: SourceWithRootPath, path: string) => {
   return {
     path,
     text: await readFile(path, 'utf8'),
+  };
+};
+
+const detectSubtitleCodecFromUri = async (source: SourceWithRootPath, uri: string) => {
+  const fromPath = parseDetectedSubtitleCodec(inferSubtitleCodecStringFromPath(uri));
+  if (fromPath) {
+    return fromPath;
+  }
+
+  const loaded = await loadPlaylistText(source, uri);
+  const fromText = parseDetectedSubtitleCodec(sniffSubtitleCodecFromText(loaded.text));
+  if (fromText) {
+    return fromText;
+  }
+
+  const lines = splitPlaylistLines(loaded.text);
+  if (lines[0] === '#EXTM3U') {
+    for (const line of lines.slice(1)) {
+      if (!line.startsWith('#')) {
+        const segmentUri = joinHlsPath(loaded.path, line);
+        const fromSegmentPath = parseDetectedSubtitleCodec(
+          inferSubtitleCodecStringFromPath(segmentUri),
+        );
+        if (fromSegmentPath) {
+          return fromSegmentPath;
+        }
+
+        const loadedSegment = await loadPlaylistText(source, segmentUri);
+        const fromSegmentText = parseDetectedSubtitleCodec(
+          sniffSubtitleCodecFromText(loadedSegment.text),
+        );
+        if (fromSegmentText) {
+          return fromSegmentText;
+        }
+        continue;
+      }
+
+      if (!line.startsWith(TAG_MAP)) {
+        continue;
+      }
+
+      const attributes = new AttributeList(line.slice(TAG_MAP.length));
+      const mapUri = attributes.get('uri');
+      if (!mapUri) {
+        continue;
+      }
+
+      const fromMapPath = parseDetectedSubtitleCodec(
+        inferSubtitleCodecStringFromPath(joinHlsPath(loaded.path, mapUri)),
+      );
+      if (fromMapPath) {
+        return fromMapPath;
+      }
+    }
+  }
+
+  return {
+    codec: 'webvtt' as const,
+    codecString: 'webvtt',
   };
 };
 
@@ -379,7 +481,11 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
 
       if (line.startsWith(TAG_EXTINF)) {
         if (!segmentSeen) {
-          if (lastProgramDateTimeSeconds === null && nextSequenceNumber > 0 && targetDuration !== null) {
+          if (
+            lastProgramDateTimeSeconds === null &&
+            nextSequenceNumber > 0 &&
+            targetDuration !== null
+          ) {
             accumulatedTime = nextSequenceNumber * targetDuration;
           }
           segmentSeen = true;
@@ -399,7 +505,9 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
       if (line.startsWith(TAG_MEDIA_SEQUENCE)) {
         const value = Number(line.slice(TAG_MEDIA_SEQUENCE.length));
         if (!Number.isInteger(value) || value < 0) {
-          throw new Error(`Invalid EXT-X-MEDIA-SEQUENCE value '${line.slice(TAG_MEDIA_SEQUENCE.length)}'.`);
+          throw new Error(
+            `Invalid EXT-X-MEDIA-SEQUENCE value '${line.slice(TAG_MEDIA_SEQUENCE.length)}'.`,
+          );
         }
         nextSequenceNumber = value;
         continue;
@@ -419,6 +527,7 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
           if (!uri) {
             throw new Error('Invalid #EXT-X-KEY: AES-128 requires a URI attribute.');
           }
+          const iv = attributes.get('iv');
 
           const keyFormat = attributes.get('keyformat') ?? 'identity';
           if (keyFormat !== 'identity') {
@@ -430,7 +539,7 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
           currentKey = {
             method,
             keyUri: joinHlsPath(this.#playlistPath, uri),
-            iv: attributes.get('iv') ? parseHexIv(attributes.get('iv')!) : null,
+            iv: iv ? parseHexIv(iv) : null,
             keyFormat,
           };
           continue;
@@ -492,7 +601,10 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
         }
 
         if (segments.length > 0 && lastProgramDateTimeSeconds === null) {
-          const lastSegment = segments.at(-1)!;
+          const lastSegment = segments.at(-1);
+          if (!lastSegment) {
+            throw new Error('Expected at least one prior HLS segment.');
+          }
           const lastSegmentEnd = lastSegment.timestamp + lastSegment.duration;
           const offset = dateTimeSeconds - lastSegmentEnd;
 
@@ -517,7 +629,9 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
       if (line.startsWith(TAG_TARGETDURATION)) {
         const duration = Number(line.slice(TAG_TARGETDURATION.length));
         if (!Number.isFinite(duration) || duration < 0) {
-          throw new Error(`Invalid EXT-X-TARGETDURATION value '${line.slice(TAG_TARGETDURATION.length)}'.`);
+          throw new Error(
+            `Invalid EXT-X-TARGETDURATION value '${line.slice(TAG_TARGETDURATION.length)}'.`,
+          );
         }
         this.#refreshIntervalSeconds = duration;
         targetDuration = duration;
@@ -576,7 +690,7 @@ export class HlsSubtitleTrackBacking {
   }
 
   getCodec() {
-    return 'webvtt' as const;
+    return this.#track.codec as never;
   }
 
   getInternalCodecId() {
@@ -638,7 +752,7 @@ export class HlsSubtitleTrackBacking {
   }
 
   getMetadataCodecParameterString() {
-    return 'webvtt';
+    return this.#track.codecString;
   }
 
   async getFirstPacket(_options: unknown): Promise<EncodedPacket | null> {
@@ -657,10 +771,7 @@ export class HlsSubtitleTrackBacking {
     return null;
   }
 
-  async getNextKeyPacket(
-    _packet: EncodedPacket,
-    _options: unknown,
-  ): Promise<EncodedPacket | null> {
+  async getNextKeyPacket(_packet: EncodedPacket, _options: unknown): Promise<EncodedPacket | null> {
     return null;
   }
 
@@ -669,7 +780,9 @@ export class HlsSubtitleTrackBacking {
   }
 }
 
-const parseMasterPlaylistSubtitles = async (input: MediabunnyInput): Promise<HlsSubtitleTrackBacking[]> => {
+const parseMasterPlaylistSubtitles = async (
+  input: MediabunnyInput,
+): Promise<HlsSubtitleTrackBacking[]> => {
   const source = input.source as unknown as SourceWithRootPath;
   if (!('rootPath' in source) || typeof source.rootPath !== 'string') {
     return [];
@@ -681,12 +794,15 @@ const parseMasterPlaylistSubtitles = async (input: MediabunnyInput): Promise<Hls
     return [];
   }
 
-  const subtitleMediaTags: HlsSubtitleMediaTag[] = [];
+  const subtitleMediaTags: HlsSubtitleMediaTagCandidate[] = [];
   const pairingMasks = new Map<string, bigint>();
   let nextPairIndex = 0n;
 
   for (let index = 1; index < lines.length; index++) {
-    const line = lines[index]!;
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
 
     if (line.startsWith(TAG_EXTINF)) {
       return [];
@@ -729,7 +845,9 @@ const parseMasterPlaylistSubtitles = async (input: MediabunnyInput): Promise<Hls
       name?.toLowerCase().includes('sdh') === true;
 
     subtitleMediaTags.push({
-      autoselect: parseAttributeBoolean(attributes.get('default')) || parseAttributeBoolean(attributes.get('autoselect')),
+      autoselect:
+        parseAttributeBoolean(attributes.get('default')) ||
+        parseAttributeBoolean(attributes.get('autoselect')),
       default: parseAttributeBoolean(attributes.get('default')),
       forced: parseAttributeBoolean(attributes.get('forced')),
       groupId,
@@ -740,8 +858,15 @@ const parseMasterPlaylistSubtitles = async (input: MediabunnyInput): Promise<Hls
     });
   }
 
+  const detectedSubtitleMediaTags = await Promise.all(
+    subtitleMediaTags.map(async (track) => ({
+      ...track,
+      ...(await detectSubtitleCodecFromUri(source, track.uri)),
+    })),
+  );
+
   const nativeTrackCount = await input._getTrackBackings().then((backings) => backings.length);
-  return subtitleMediaTags.map(
+  return detectedSubtitleMediaTags.map(
     (track, index) =>
       new HlsSubtitleTrackBacking({
         id: nativeTrackCount + index + 1,

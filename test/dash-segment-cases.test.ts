@@ -124,6 +124,45 @@ test('infer subtitle codecs from text manifests', async () => {
   expect(spanishSegments[0]?.location.path).toBe('https://example.com/es.vtt');
 });
 
+test('infer raw DASH SRT and TTML subtitle codecs from mime types', async () => {
+  using input = createAssetInput('subtitle-codecs-raw.mpd', DASH_FORMATS);
+
+  const subtitleTracks = (await input.getTracks()).filter((track) => track.type === 'subtitle');
+  expect(subtitleTracks).toHaveLength(2);
+
+  const subtitleEntries = await Promise.all(
+    subtitleTracks.map(async (track) => ({
+      track,
+      language: await track.getLanguageCode(),
+      codec: await track.getCodec(),
+      codecString: await track.getCodecParameterString(),
+    })),
+  );
+
+  expect(subtitleEntries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        language: 'en',
+        codec: 'ttml',
+        codecString: 'ttml+xml',
+      }),
+      expect.objectContaining({
+        language: 'es',
+        codec: 'srt',
+        codecString: 'x-subrip',
+      }),
+    ]),
+  );
+
+  const englishTrack = subtitleEntries.find((entry) => entry.language === 'en')!.track;
+  const spanishTrack = subtitleEntries.find((entry) => entry.language === 'es')!.track;
+
+  const englishSegments = await englishTrack.getSegments();
+  const spanishSegments = await spanishTrack.getSegments();
+  expect(englishSegments[0]?.location.path).toBe('https://example.com/subtitles/en.ttml');
+  expect(spanishSegments[0]?.location.path).toBe('https://example.com/subtitles/es.srt');
+});
+
 test('parse DASH subtitle segment urls through getSegments()', async () => {
   using input = createAssetInput('axinom-2.mpd', DASH_FORMATS);
 
@@ -140,8 +179,7 @@ test('parse DASH subtitle segment urls through getSegments()', async () => {
       })),
     )
   ).find(
-    (entry) =>
-      entry.language === 'en' && entry.codec === 'webvtt' && entry.codecString === 'wvtt',
+    (entry) => entry.language === 'en' && entry.codec === 'webvtt' && entry.codecString === 'wvtt',
   )?.track;
 
   expect(englishWvttTrack).toBeDefined();

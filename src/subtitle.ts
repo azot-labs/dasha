@@ -2,7 +2,7 @@ import { parseMimes } from './util';
 import { SubtitleCodec } from './codec';
 
 const parseSubtitleCodecFromMime = (mime: string): SubtitleCodec => {
-  const target = mime.toLowerCase().trim().split('.')[0];
+  const target = mime.toLowerCase().trim().split(/[.+;]/)[0];
   switch (target) {
     case 'srt':
     case 'x-subrip':

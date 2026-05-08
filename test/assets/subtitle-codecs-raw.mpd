@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT6S">
+  <Period>
+    <AdaptationSet contentType="text" mimeType="application/ttml+xml" lang="en">
+      <Representation bandwidth="256" id="en">
+        <BaseURL>https://example.com/subtitles/en.ttml</BaseURL>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet contentType="text" mimeType="application/x-subrip" lang="es">
+      <Representation bandwidth="256" id="es">
+        <BaseURL>https://example.com/subtitles/es.srt</BaseURL>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
