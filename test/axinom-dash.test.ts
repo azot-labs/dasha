@@ -39,7 +39,7 @@ test('parse axinom multi-drm manifest through the Input API', async () => {
   expect(tracks).toHaveLength(23);
 
   const firstSubtitleTrack = tracks.find((track) => track.type === 'subtitle');
-  expect(await firstSubtitleTrack?.getCodec()).toBe('wvtt');
+  expect(await firstSubtitleTrack?.getCodec()).toBe('webvtt');
   const subtitleLanguages = await Promise.all(
     tracks.filter((track) => track.type === 'subtitle').map((track) => track.getLanguageCode()),
   );

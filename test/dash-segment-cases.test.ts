@@ -115,13 +115,48 @@ test('infer subtitle codecs from text manifests', async () => {
   expect(englishTrack?.codecString).toBe('stpp.ttml.im1t');
 
   expect(spanishTrack).toBeDefined();
-  expect(spanishTrack?.codec).toBe('vtt');
+  expect(spanishTrack?.codec).toBe('webvtt');
   expect(spanishTrack?.codecString).toBe('vtt');
 
   const englishSegments = await englishTrack!.track.getSegments();
   const spanishSegments = await spanishTrack!.track.getSegments();
   expect(englishSegments[0]?.location.path).toBe('https://example.com/en.dash');
   expect(spanishSegments[0]?.location.path).toBe('https://example.com/es.vtt');
+});
+
+test('parse DASH subtitle segment urls through getSegments()', async () => {
+  using input = createAssetInput('axinom-2.mpd', DASH_FORMATS);
+
+  const subtitleTracks = (await input.getTracks()).filter((track) => track.type === 'subtitle');
+  expect(subtitleTracks).toHaveLength(10);
+
+  const englishWvttTrack = (
+    await Promise.all(
+      subtitleTracks.map(async (track) => ({
+        track,
+        language: await track.getLanguageCode(),
+        codec: await track.getCodec(),
+        codecString: await track.getCodecParameterString(),
+      })),
+    )
+  ).find(
+    (entry) =>
+      entry.language === 'en' && entry.codec === 'webvtt' && entry.codecString === 'wvtt',
+  )?.track;
+
+  expect(englishWvttTrack).toBeDefined();
+
+  const segments = await englishWvttTrack!.getSegments();
+  expect(segments).toHaveLength(184);
+  expect(segments[0]?.initSegment?.location.path).toBe(
+    'https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/18/init.mp4',
+  );
+  expect(segments[0]?.location.path).toBe(
+    'https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/18/0001.m4s',
+  );
+  expect(segments[1]?.location.path).toBe(
+    'https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/18/0002.m4s',
+  );
 });
 
 test('parse SegmentTemplate start numbers and padding', async () => {

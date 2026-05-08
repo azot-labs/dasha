@@ -13,12 +13,12 @@ const parseSubtitleCodecFromMime = (mime: string): SubtitleCodec => {
       return 'ass';
     case 'ttml':
       return 'ttml';
+    case 'webvtt':
     case 'vtt':
-      return 'vtt';
+    case 'wvtt':
+      return 'webvtt';
     case 'stpp':
       return 'stpp';
-    case 'wvtt':
-      return 'wvtt';
     default:
       throw new Error(`The MIME ${mime} is not supported as subtitle codec`);
   }

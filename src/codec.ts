@@ -49,7 +49,7 @@ export const AUDIO_CODECS = [
  */
 export const SUBTITLE_CODECS = [
   'srt', // https://wiki.x266.mov/docs/subtitles/SRT
-  'vtt', // https://www.w3.org/TR/webvtt1/
+  'webvtt', // https://www.w3.org/TR/webvtt1/
   'ttml', // https://www.w3.org/TR/ttml1/
   'dfxp', // https://www.w3.org/TR/ttml1/#profile-dfxp-full
   'ssa', // http://www.tcax.org/docs/ass-specs.htm
@@ -57,7 +57,6 @@ export const SUBTITLE_CODECS = [
   // MPEG-DASH box-encapsulated subtitle formats
   // https://docs.unified-streaming.com/documentation/live/subtitles.html#subtitles-for-mpeg-dash
   'stpp',
-  'wvtt',
 ] as const;
 
 /**
