@@ -100,3 +100,26 @@ test('parse HLS subtitle segment urls through getSegments()', async () => {
     assetFileUrl('hls-subtitles-en-forced-0002.vtt'),
   );
 });
+
+test('preserve HLS subtitle encryption metadata on returned segments', async () => {
+  using input = new Input({
+    source: new FilePathSource(assetPath('hls-subtitles-encrypted-master.m3u8')),
+    formats: HLS_FORMATS,
+  });
+
+  const subtitleTrack = (await input.getTracks()).find((track) => track.type === 'subtitle');
+  expect(subtitleTrack).toBeDefined();
+
+  const segments = await subtitleTrack!.getSegments();
+
+  expect(segments).toHaveLength(2);
+  expect(segments[0]?.encryption).toEqual({
+    method: 'AES-128',
+    keyUri: 'https://example.com/subs.key',
+    iv: expect.any(Uint8Array),
+    keyFormat: 'identity',
+  });
+  expect(segments[1]?.encryption).toEqual({
+    method: 'SAMPLE-AES-CTR',
+  });
+});

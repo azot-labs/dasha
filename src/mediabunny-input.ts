@@ -1,4 +1,4 @@
-import { Input as MediabunnyInput, InputTrack as MediabunnyInputTrack } from 'mediabunny';
+import { HLS, Input as MediabunnyInput, InputTrack as MediabunnyInputTrack } from 'mediabunny';
 import type {
   InputAudioTrack as MediabunnyInputAudioTrack,
   EncodedPacket,
@@ -273,6 +273,10 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     type?: typeof BACKING_TYPE_VIDEO | typeof BACKING_TYPE_AUDIO | typeof BACKING_TYPE_SUBTITLE,
   ) {
     if (type && type !== BACKING_TYPE_SUBTITLE) {
+      return [];
+    }
+
+    if ((await this.getFormat()) !== HLS) {
       return [];
     }
 

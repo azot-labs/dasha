@@ -12,6 +12,7 @@ const TAG_STREAM_INF = '#EXT-X-STREAM-INF:';
 const TAG_MEDIA = '#EXT-X-MEDIA:';
 const TAG_EXTINF = '#EXTINF:';
 const TAG_MAP = '#EXT-X-MAP:';
+const TAG_KEY = '#EXT-X-KEY:';
 const TAG_MEDIA_SEQUENCE = '#EXT-X-MEDIA-SEQUENCE:';
 const TAG_BYTERANGE = '#EXT-X-BYTERANGE:';
 const TAG_PROGRAM_DATE_TIME = '#EXT-X-PROGRAM-DATE-TIME:';
@@ -19,6 +20,8 @@ const TAG_DISCONTINUITY = '#EXT-X-DISCONTINUITY';
 const TAG_TARGETDURATION = '#EXT-X-TARGETDURATION:';
 const TAG_ENDLIST = '#EXT-X-ENDLIST';
 const TAG_PLAYLIST_TYPE = '#EXT-X-PLAYLIST-TYPE:';
+const AES_128_BLOCK_SIZE = 16;
+const IV_STRING_REGEX = /^0[xX][0-9a-fA-F]+$/;
 
 const DEFAULT_TRACK_DISPOSITION: TrackDisposition = {
   commentary: false,
@@ -46,6 +49,8 @@ type HlsSubtitleMediaTag = {
   name: string | null;
   uri: string;
 };
+
+type HlsEncryptionInfo = HlsSegment['encryption'];
 
 const subtitleBackingsCache = new WeakMap<MediabunnyInput, Promise<HlsSubtitleTrackBacking[]>>();
 
@@ -228,6 +233,30 @@ const parseMediaRange = (value: string) => {
   };
 };
 
+const parseHexIv = (value: string) => {
+  if (!IV_STRING_REGEX.test(value)) {
+    throw new Error(`Unsupported IV format '${value}'.`);
+  }
+
+  let hex = value.slice(2);
+  hex = hex.padStart(AES_128_BLOCK_SIZE * 2, '0');
+
+  const iv = new Uint8Array(AES_128_BLOCK_SIZE);
+  for (let index = 0; index < AES_128_BLOCK_SIZE; index++) {
+    const startIndex = index * 2;
+    iv[index] = Number.parseInt(hex.slice(startIndex, startIndex + 2), 16);
+  }
+  return iv;
+};
+
+const createSequenceIv = (sequenceNumber: number) => {
+  const iv = new Uint8Array(AES_128_BLOCK_SIZE);
+  const view = new DataView(iv.buffer, iv.byteOffset, iv.byteLength);
+  view.setUint32(8, Math.floor(sequenceNumber / 2 ** 32));
+  view.setUint32(12, sequenceNumber);
+  return iv;
+};
+
 class HlsSubtitlePlaylist implements HlsSegmentedInput {
   segments: HlsSegment[] = [];
   #source: SourceWithRootPath;
@@ -293,6 +322,7 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
 
     let accumulatedTime = 0;
     let nextDuration: number | null = null;
+    let currentKey: HlsEncryptionInfo = null;
     let nextSequenceNumber = 0;
     let currentFirstSegment: HlsSegment | null = null;
     let currentInitSegment: HlsSegment | null = null;
@@ -316,6 +346,10 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
           offset: nextByteRange?.offset ?? 0,
           length: nextByteRange?.length ?? null,
         };
+        const encryption =
+          currentKey?.method === 'AES-128' && !currentKey.iv
+            ? { ...currentKey, iv: createSequenceIv(nextSequenceNumber) }
+            : currentKey;
         const segment: HlsSegment = {
           timestamp: accumulatedTime,
           duration: nextDuration,
@@ -323,7 +357,7 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
           firstSegment: currentFirstSegment,
           sequenceNumber: nextSequenceNumber,
           location,
-          encryption: null,
+          encryption,
           initSegment: currentInitSegment,
           lastProgramDateTimeSeconds,
         };
@@ -369,6 +403,47 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
         }
         nextSequenceNumber = value;
         continue;
+      }
+
+      if (line.startsWith(TAG_KEY)) {
+        const attributes = new AttributeList(line.slice(TAG_KEY.length));
+        const method = attributes.get('method');
+
+        if (method === 'NONE') {
+          currentKey = null;
+          continue;
+        }
+
+        if (method === 'AES-128') {
+          const uri = attributes.get('uri');
+          if (!uri) {
+            throw new Error('Invalid #EXT-X-KEY: AES-128 requires a URI attribute.');
+          }
+
+          const keyFormat = attributes.get('keyformat') ?? 'identity';
+          if (keyFormat !== 'identity') {
+            throw new Error(
+              "For AES-128 encryption, only the 'identity' KEYFORMAT is currently supported.",
+            );
+          }
+
+          currentKey = {
+            method,
+            keyUri: joinHlsPath(this.#playlistPath, uri),
+            iv: attributes.get('iv') ? parseHexIv(attributes.get('iv')!) : null,
+            keyFormat,
+          };
+          continue;
+        }
+
+        if (method === 'SAMPLE-AES' || method === 'SAMPLE-AES-CTR') {
+          currentKey = {
+            method,
+          };
+          continue;
+        }
+
+        throw new Error(`Unsupported encryption method '${method}'.`);
       }
 
       if (line.startsWith(TAG_BYTERANGE)) {
