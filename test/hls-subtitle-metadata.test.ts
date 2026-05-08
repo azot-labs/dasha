@@ -23,7 +23,7 @@ const getSubtitleDetails = async () => {
   return { subtitleTracks, details };
 };
 
-test.fails('parse HLS subtitle track codecs and languages from a master playlist', async () => {
+test('parse HLS subtitle track codecs and languages from a master playlist', async () => {
   const { subtitleTracks, details } = await getSubtitleDetails();
 
   expect(subtitleTracks.length).toBeGreaterThan(0);
@@ -36,7 +36,7 @@ test.fails('parse HLS subtitle track codecs and languages from a master playlist
   );
 });
 
-test.fails('map HLS subtitle FORCED and SDH metadata to track dispositions', async () => {
+test('map HLS subtitle FORCED and SDH metadata to track dispositions', async () => {
   const { subtitleTracks, details } = await getSubtitleDetails();
 
   expect(subtitleTracks.length).toBeGreaterThan(0);
@@ -54,7 +54,7 @@ test.fails('map HLS subtitle FORCED and SDH metadata to track dispositions', asy
   );
 });
 
-test.fails('parse HLS subtitle segment urls through getSegments()', async () => {
+test('parse HLS subtitle segment urls through getSegments()', async () => {
   using input = new Input({
     source: new FilePathSource(assetPath('hls-subtitles-master.m3u8')),
     formats: HLS_FORMATS,
