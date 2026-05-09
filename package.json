@@ -1,6 +1,6 @@
 {
   "name": "dasha",
-  "version": "4.0.3",
+  "version": "4.1.0",
   "description": "Streaming manifest parser",
   "packageManager": "pnpm@11.0.0",
   "files": [
