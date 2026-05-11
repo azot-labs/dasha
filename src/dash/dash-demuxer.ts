@@ -17,7 +17,7 @@ import { ENCRYPT_METHODS } from '../encrypt-method';
 import { ROLE_TYPE } from '../role-type';
 import { checkIsClosedCaption, checkIsSdh } from '../subtitle';
 import { combineUrl } from '../util';
-import { parseDynamicRange } from '../video';
+import { parseColorSpace, parseDynamicRange } from '../video';
 import {
   DASH_MIME_TYPE,
   DASH_TEMPLATE_BANDWIDTH,
@@ -401,7 +401,10 @@ const createDashTrack = (params: {
       track.height = Number(height);
     }
     track.frameRate = frameRate ?? getDashFrameRate(representation);
-    if (track.codecString && supplementalProps && essentialProps) {
+    if (supplementalProps.length > 0 && essentialProps.length > 0) {
+      track.colorSpace = parseColorSpace(supplementalProps, essentialProps);
+    }
+    if (track.codecString && supplementalProps.length > 0 && essentialProps.length > 0) {
       track.dynamicRange = parseDynamicRange(track.codecString, supplementalProps, essentialProps);
     }
   } else if (track.type === 'audio') {
@@ -1394,7 +1397,7 @@ class DashInputVideoTrackBacking extends DashTrackBackingBase {
   }
 
   async getColorSpace(): Promise<VideoColorSpaceInit> {
-    return this.delegate((track) => track.getColorSpace());
+    return this.internalTrack.track.colorSpace ?? this.delegate((track) => track.getColorSpace());
   }
 
   async canBeTransparent() {

@@ -28,6 +28,29 @@ const MATRIX = {
   ICtCp_BT_2100: 14,
 };
 
+const DOLBY_VISION_CODECS = ['dva1', 'dvav', 'dvhe', 'dvh1'];
+type CicpProperty = { schemeIdUri: string; value?: string };
+const COLOR_PRIMARIES_MAP = new Map<number, string>([
+  [PRIMARIES.BT_709, 'bt709'],
+  [PRIMARIES.BT_601_625, 'bt470bg'],
+  [PRIMARIES.BT_601_525, 'smpte170m'],
+  [PRIMARIES.BT_2020_and_2100, 'bt2020'],
+  [PRIMARIES.SMPTE_ST_2113_and_EG_4321, 'smpte432'],
+]);
+const TRANSFER_CHARACTERISTICS_MAP = new Map<number, string>([
+  [TRANSFER.BT_709, 'bt709'],
+  [TRANSFER.BT_601, 'smpte170m'],
+  [TRANSFER.BT_2100_PQ, 'pq'],
+  [TRANSFER.BT_2100_HLG, 'hlg'],
+]);
+const MATRIX_COEFFICIENTS_MAP = new Map<number, string>([
+  [MATRIX.RGB, 'rgb'],
+  [MATRIX.YCbCr_BT_709, 'bt709'],
+  [MATRIX.YCbCr_BT_601_625, 'bt470bg'],
+  [MATRIX.YCbCr_BT_601_525, 'smpte170m'],
+  [MATRIX.YCbCr_BT_2020_and_2100, 'bt2020-ncl'],
+]);
+
 const parseVideoCodecFromMime = (mime: string): VideoCodec => {
   const target = mime.toLowerCase().trim().split('.')[0];
   const avc = ['avc1', 'avc2', 'avc3', 'dva1', 'dvav'];
@@ -45,7 +68,7 @@ const parseVideoCodecFromMime = (mime: string): VideoCodec => {
   throw new Error(`The MIME ${mime} is not supported as video codec`);
 };
 
-const parseDynamicRangeFromCicp = (
+export const parseDynamicRangeFromCicp = (
   primaries: number,
   transfer: number,
   matrix: number,
@@ -71,6 +94,118 @@ const parseDynamicRangeFromCicp = (
   }
 };
 
+export const parseColorSpaceFromCicp = (
+  primaries: number,
+  transfer: number,
+  matrix: number,
+): VideoColorSpaceInit => {
+  const normalizedTransfer = transfer == 5 ? TRANSFER.BT_601 : transfer;
+
+  return {
+    primaries: COLOR_PRIMARIES_MAP.get(primaries),
+    transfer: TRANSFER_CHARACTERISTICS_MAP.get(normalizedTransfer),
+    matrix: MATRIX_COEFFICIENTS_MAP.get(matrix),
+  } as VideoColorSpaceInit;
+};
+
+export const parseDynamicRangeFromCodecString = (
+  codecs: string | null | undefined,
+): VideoDynamicRange | undefined => {
+  const normalized = codecs?.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  return DOLBY_VISION_CODECS.some((value) => normalized.startsWith(value)) ? 'dv' : undefined;
+};
+
+const getCicpValues = (
+  supplementalProps: CicpProperty[] = [],
+  essentialProps: CicpProperty[] = [],
+) => {
+  const primariesScheme = 'urn:mpeg:mpegB:cicp:ColourPrimaries';
+  const transferScheme = 'urn:mpeg:mpegB:cicp:TransferCharacteristics';
+  const matrixScheme = 'urn:mpeg:mpegB:cicp:MatrixCoefficients';
+  const allProps = [...essentialProps, ...supplementalProps];
+  const getValues = (schemeIdUri: string) =>
+    allProps
+      .filter((prop) => prop.schemeIdUri === schemeIdUri)
+      .flatMap((prop) => (prop.value ? [Number.parseInt(prop.value, 10)] : []));
+
+  return {
+    primaries: getValues(primariesScheme)[0] ?? 0,
+    transfer: getValues(transferScheme)[0] ?? 0,
+    matrix: getValues(matrixScheme)[0] ?? 0,
+  };
+};
+
+export const parseColorSpace = (
+  supplementalProps: CicpProperty[] = [],
+  essentialProps: CicpProperty[] = [],
+) => {
+  const { primaries, transfer, matrix } = getCicpValues(supplementalProps, essentialProps);
+  return parseColorSpaceFromCicp(primaries, transfer, matrix);
+};
+
+export const parseDynamicRangeFromHlsVideoRange = (
+  videoRange: string | null | undefined,
+  codecs?: string | null,
+): VideoDynamicRange | undefined => {
+  const normalized = videoRange?.replaceAll('"', '').trim().toUpperCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const codecDynamicRange = parseDynamicRangeFromCodecString(codecs);
+  if (normalized === 'PQ') {
+    return codecDynamicRange ?? 'hdr10';
+  }
+  if (normalized === 'HLG') {
+    return 'hlg';
+  }
+  if (normalized === 'SDR') {
+    return 'sdr';
+  }
+  return undefined;
+};
+
+export const parseDynamicRangeFromColorSpace = (
+  colorSpace: VideoColorSpaceInit | null | undefined,
+): VideoDynamicRange | undefined => {
+  if (!colorSpace) {
+    return undefined;
+  }
+
+  if ((colorSpace.transfer as string | undefined) === 'pq') {
+    return 'hdr10';
+  }
+  if ((colorSpace.transfer as string | undefined) === 'hlg') {
+    return 'hlg';
+  }
+  if (
+    colorSpace.primaries != null ||
+    colorSpace.transfer != null ||
+    colorSpace.matrix != null ||
+    colorSpace.fullRange != null
+  ) {
+    return 'sdr';
+  }
+  return undefined;
+};
+
+export const inferDynamicRange = (params: {
+  codecs?: string | null;
+  videoRange?: string | null;
+  colorSpace?: VideoColorSpaceInit | null;
+}): VideoDynamicRange => {
+  return (
+    parseDynamicRangeFromCodecString(params.codecs) ??
+    parseDynamicRangeFromHlsVideoRange(params.videoRange, params.codecs) ??
+    parseDynamicRangeFromColorSpace(params.colorSpace) ??
+    'sdr'
+  );
+};
+
 const parseVideoCodec = (codecs: string) => {
   for (const codec of codecs.toLowerCase().split(',')) {
     const mime = codec.trim().split('.')[0];
@@ -93,21 +228,11 @@ export const tryParseVideoCodec = (codecs: string) => {
 
 export const parseDynamicRange = (
   codecs: string,
-  supplementalProps: { schemeIdUri: string; value?: string }[] = [],
-  essentialProps: { schemeIdUri: string; value?: string }[] = [],
+  supplementalProps: CicpProperty[] = [],
+  essentialProps: CicpProperty[] = [],
 ): VideoDynamicRange => {
-  const dv = ['dva1', 'dvav', 'dvhe', 'dvh1'];
-  if (dv.some((value) => codecs.startsWith(value))) return 'dv';
-  const primariesScheme = 'urn:mpeg:mpegB:cicp:ColourPrimaries';
-  const transferScheme = 'urn:mpeg:mpegB:cicp:TransferCharacteristics';
-  const matrixScheme = 'urn:mpeg:mpegB:cicp:MatrixCoefficients';
-  const allProps = [...essentialProps, ...supplementalProps];
-  const getValues = (schemeIdUri: string) =>
-    allProps
-      .filter((prop) => prop.schemeIdUri === schemeIdUri)
-      .flatMap((prop) => (prop.value ? [parseInt(prop.value)] : []));
-  const primaries = getValues(primariesScheme).reduce((acc, current) => acc + current, 0);
-  const transfer = getValues(transferScheme).reduce((acc, current) => acc + current, 0);
-  const matrix = getValues(matrixScheme).reduce((acc, current) => acc + current, 0);
+  const codecDynamicRange = parseDynamicRangeFromCodecString(codecs);
+  if (codecDynamicRange) return codecDynamicRange;
+  const { primaries, transfer, matrix } = getCicpValues(supplementalProps, essentialProps);
   return parseDynamicRangeFromCicp(primaries, transfer, matrix);
 };

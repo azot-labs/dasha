@@ -63,6 +63,7 @@ export type DashParsedVideoTrack = DashTrackCommon & {
   width?: number;
   height?: number;
   frameRate?: number;
+  colorSpace?: VideoColorSpaceInit;
   dynamicRange?: VideoDynamicRange;
 };
 

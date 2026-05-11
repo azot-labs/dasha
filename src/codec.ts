@@ -34,7 +34,7 @@ export type VideoDynamicRange = 'sdr' | 'hlg' | 'hdr10' | 'hdr10+' | 'dv';
  * @group Codecs
  * @public
  */
-export type AudioCodec = MediabunnyAudioCodec | 'dts';
+export type AudioCodec = MediabunnyAudioCodec | 'dts' | 'alac';
 
 /**
  * Union type of known subtitle codecs.
