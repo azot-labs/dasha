@@ -37,11 +37,10 @@ type SegmentAccessMethods = {
   getSegments(): Promise<(HlsSegment | DashSegment)[]>;
 };
 
-export type MediabunnyTrackWithSegments = MediabunnyInputTrack & SegmentAccessMethods;
-export type MediabunnyVideoTrackWithSegments = MediabunnyInputVideoTrack & SegmentAccessMethods;
-export type MediabunnyAudioTrackWithSegments = MediabunnyInputAudioTrack & SegmentAccessMethods;
-export type MediabunnySubtitleTrackWithSegments = MediabunnyInputSubtitleTrack &
-  SegmentAccessMethods;
+export type InputTrack = MediabunnyInputTrack & SegmentAccessMethods;
+export type InputVideoTrack = MediabunnyInputVideoTrack & SegmentAccessMethods;
+export type InputAudioTrack = MediabunnyInputAudioTrack & SegmentAccessMethods;
+export type InputSubtitleTrack = MediabunnyInputSubtitleTrack & SegmentAccessMethods;
 
 export type InputSubtitleSource = PathedSource | SourceRef<PathedSource>;
 export type InputSubtitleTrackMetadata = {
@@ -50,7 +49,7 @@ export type InputSubtitleTrackMetadata = {
   disposition?: Partial<TrackDisposition>;
   languageCode?: string;
   name?: string | null;
-  pairWith?: MediabunnyVideoTrackWithSegments | Iterable<MediabunnyVideoTrackWithSegments>;
+  pairWith?: InputVideoTrack | Iterable<InputVideoTrack>;
 };
 
 type InternalInput<S extends Source = Source> = MediabunnyInput<S> & {
@@ -281,7 +280,7 @@ export const preserveSubtitleBackingsOnInput = (input: MediabunnyInput) => {
 };
 
 export class SegmentedMediabunnyInput<S extends Source = Source> extends MediabunnyInput<S> {
-  #trackCache = new WeakMap<MediabunnyInputTrack, MediabunnyTrackWithSegments>();
+  #trackCache = new WeakMap<MediabunnyInputTrack, InputTrack>();
   #subtitleTrackCache = new WeakMap<object, MediabunnyInputSubtitleTrack>();
   #hlsSubtitleBackingsPromise: Promise<HlsSubtitleTrackBacking[]> | null = null;
   #customSubtitleBackings: ExternalSubtitleTrackBacking[] = [];
@@ -298,7 +297,7 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     return queryWrappedTracks(internalInput, backings, query);
   }
 
-  override _wrapBackingAsTrack(backing: TrackBacking): MediabunnyTrackWithSegments {
+  override _wrapBackingAsTrack(backing: TrackBacking): InputTrack {
     const track =
       (backing as SegmentableBacking).getType?.() === 'subtitle'
         ? this.#wrapSubtitleBacking(backing as SegmentableBacking)
@@ -345,47 +344,34 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     return track;
   }
 
-  override async getTracks(query?: InputTrackQuery<MediabunnyTrackWithSegments>) {
-    return (await this.#queryTracks(query)) as MediabunnyTrackWithSegments[];
+  override async getTracks(query?: InputTrackQuery<InputTrack>) {
+    return (await this.#queryTracks(query)) as InputTrack[];
   }
 
-  override async getVideoTracks(query?: InputTrackQuery<MediabunnyVideoTrackWithSegments>) {
-    return (await this.#queryTracks(
-      query,
-      BACKING_TYPE_VIDEO,
-    )) as MediabunnyVideoTrackWithSegments[];
+  override async getVideoTracks(query?: InputTrackQuery<InputVideoTrack>) {
+    return (await this.#queryTracks(query, BACKING_TYPE_VIDEO)) as InputVideoTrack[];
   }
 
-  override async getAudioTracks(query?: InputTrackQuery<MediabunnyAudioTrackWithSegments>) {
-    return (await this.#queryTracks(
-      query,
-      BACKING_TYPE_AUDIO,
-    )) as MediabunnyAudioTrackWithSegments[];
+  override async getAudioTracks(query?: InputTrackQuery<InputAudioTrack>) {
+    return (await this.#queryTracks(query, BACKING_TYPE_AUDIO)) as InputAudioTrack[];
   }
 
-  async getSubtitleTracks(query?: InputTrackQuery<MediabunnySubtitleTrackWithSegments>) {
-    return (await this.#queryTracks(
-      query,
-      BACKING_TYPE_SUBTITLE,
-    )) as MediabunnySubtitleTrackWithSegments[];
+  async getSubtitleTracks(query?: InputTrackQuery<InputSubtitleTrack>) {
+    return (await this.#queryTracks(query, BACKING_TYPE_SUBTITLE)) as InputSubtitleTrack[];
   }
 
-  override async getPrimaryVideoTrack(query?: InputTrackQuery<MediabunnyVideoTrackWithSegments>) {
-    return (await super.getPrimaryVideoTrack(
-      query as never,
-    )) as MediabunnyVideoTrackWithSegments | null;
+  override async getPrimaryVideoTrack(query?: InputTrackQuery<InputVideoTrack>) {
+    return (await super.getPrimaryVideoTrack(query as never)) as InputVideoTrack | null;
   }
 
-  override async getPrimaryAudioTrack(query?: InputTrackQuery<MediabunnyAudioTrackWithSegments>) {
-    return (await super.getPrimaryAudioTrack(
-      query as never,
-    )) as MediabunnyAudioTrackWithSegments | null;
+  override async getPrimaryAudioTrack(query?: InputTrackQuery<InputAudioTrack>) {
+    return (await super.getPrimaryAudioTrack(query as never)) as InputAudioTrack | null;
   }
 
   addSubtitleTrack(
     source: InputSubtitleSource,
     metadata: InputSubtitleTrackMetadata = {},
-  ): MediabunnySubtitleTrackWithSegments {
+  ): InputSubtitleTrack {
     const pathedSource = this.#takeSubtitleSourceRef(source);
     const sourceWithRootPath = pathedSource.source as SourceWithRootPath;
     if (typeof sourceWithRootPath.rootPath !== 'string') {
@@ -407,7 +393,7 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
 
     this.#pairSubtitleBacking(backing, pairWith);
     this.#customSubtitleBackings.push(backing);
-    return this._wrapBackingAsTrack(backing) as MediabunnySubtitleTrackWithSegments;
+    return this._wrapBackingAsTrack(backing) as InputSubtitleTrack;
   }
 
   #takeSubtitleSourceRef(source: InputSubtitleSource) {
@@ -426,12 +412,7 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     return ref;
   }
 
-  #toPairableVideoTracks(
-    pairWith:
-      | MediabunnyVideoTrackWithSegments
-      | Iterable<MediabunnyVideoTrackWithSegments>
-      | undefined,
-  ) {
+  #toPairableVideoTracks(pairWith: InputVideoTrack | Iterable<InputVideoTrack> | undefined) {
     if (!pairWith) {
       return [];
     }
@@ -454,7 +435,7 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
 
   #pairSubtitleBacking(
     subtitleBacking: ExternalSubtitleTrackBacking,
-    videoTracks: MediabunnyVideoTrackWithSegments[],
+    videoTracks: InputVideoTrack[],
   ) {
     for (const track of videoTracks) {
       const bit = this.#allocatePairingBit();
