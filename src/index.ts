@@ -5,6 +5,7 @@ import {
   HLS_FORMATS,
   MP4,
   MP3,
+  ALL_FORMATS as ALL_MEDIABUNNY_FORMATS,
   desc,
   asc,
   prefer,
@@ -46,6 +47,8 @@ export const getSegmentedInput = (track: InputTrack): InputSegmentedInput =>
 export const getSegments = async (track: InputTrack): Promise<InputSegment[]> =>
   track.getSegments();
 
+const ALL_FORMATS = [...ALL_MEDIABUNNY_FORMATS, DASH];
+
 export {
   FilePathSource,
   UrlSource,
@@ -55,6 +58,7 @@ export {
   HLS_FORMATS,
   DASH,
   DASH_FORMATS,
+  ALL_FORMATS,
   desc,
   asc,
   prefer,
