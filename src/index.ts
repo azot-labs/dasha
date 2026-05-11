@@ -1,17 +1,6 @@
-import {
-  FilePathSource,
-  UrlSource,
-  HLS,
-  HLS_FORMATS,
-  MP4,
-  MP3,
-  ALL_FORMATS as ALL_MEDIABUNNY_FORMATS,
-  desc,
-  asc,
-  prefer,
-} from 'mediabunny';
 import type { InputFormat, InputOptions as MediabunnyInputOptions, Source } from 'mediabunny';
 import type { HlsSegmentedInput, HlsSegment, InputTrackWithBacking } from './mediabunny';
+import { ALL_FORMATS as ALL_MEDIABUNNY_FORMATS } from 'mediabunny';
 import { DASH, DASH_FORMATS } from './dash/dash-demuxer';
 import type { DashSegment, DashSegmentedInput } from './dash/dash-segmented-input';
 import {
@@ -49,22 +38,21 @@ export const getSegments = async (track: InputTrack): Promise<InputSegment[]> =>
 
 const ALL_FORMATS = [...ALL_MEDIABUNNY_FORMATS, DASH];
 
+export { DASH, DASH_FORMATS, ALL_FORMATS };
 export {
-  FilePathSource,
   UrlSource,
-  MP4,
-  MP3,
+  FilePathSource,
   HLS,
   HLS_FORMATS,
-  DASH,
-  DASH_FORMATS,
-  ALL_FORMATS,
+  MP4,
+  MP3,
   desc,
   asc,
   prefer,
-};
+  type MaybePromise,
+} from 'mediabunny';
 export { preserveSubtitleBackingsOnInput };
-export type { MediaCodec, SubtitleCodec } from './codec';
+export type { MediaCodec, VideoCodec, AudioCodec, SubtitleCodec, VideoDynamicRange } from './codec';
 export type { InputSubtitleSource, InputSubtitleTrackMetadata };
 export type {
   HlsSegment,
