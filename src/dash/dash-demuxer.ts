@@ -401,10 +401,10 @@ const createDashTrack = (params: {
       track.height = Number(height);
     }
     track.frameRate = frameRate ?? getDashFrameRate(representation);
-    if (supplementalProps.length > 0 && essentialProps.length > 0) {
+    if (supplementalProps.length > 0 || essentialProps.length > 0) {
       track.colorSpace = parseColorSpace(supplementalProps, essentialProps);
     }
-    if (track.codecString && supplementalProps.length > 0 && essentialProps.length > 0) {
+    if (track.codecString && (supplementalProps.length > 0 || essentialProps.length > 0)) {
       track.dynamicRange = parseDynamicRange(track.codecString, supplementalProps, essentialProps);
     }
   } else if (track.type === 'audio') {
