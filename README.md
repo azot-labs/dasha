@@ -42,6 +42,7 @@ async function saveVideo() {
   });
 
   const bestVideoTrack = videoTracks[0];
+  console.log('Dynamic range:', await bestVideoTrack.getDynamicRange()); // sdr
 
   const segments = await bestVideoTrack.getSegments();
 
@@ -90,6 +91,43 @@ async function saveDashVideo() {
     const content = await fetch(url).then((res) => res.arrayBuffer());
     await fs.appendFile(outputPath, new Uint8Array(content));
   }
+}
+```
+
+### Adding external subtitle tracks
+
+`addSubtitleTrack()` is useful when subtitle URLs are provided separately from the HLS/DASH manifest. Added subtitles become part of the same `Input`, so they can be queried, filtered and downloaded through the regular subtitle track API.
+
+```ts
+import { DASH_FORMATS, Input, UrlSource } from 'dasha';
+
+async function getEnglishSubtitles() {
+  const input = new Input({
+    source: new UrlSource('https://example.com/manifest.mpd'),
+    formats: DASH_FORMATS,
+  });
+
+  const primaryVideoTrack = await input.getPrimaryVideoTrack();
+  if (!primaryVideoTrack) {
+    throw new Error('No video tracks found');
+  }
+
+  input.addSubtitleTrack(new UrlSource('https://cdn.example.com/subtitles/en.vtt'), {
+    languageCode: 'en',
+    name: 'English',
+    pairWith: primaryVideoTrack,
+  });
+
+  const englishSubtitleTracks = await input.getSubtitleTracks({
+    filter: async (track) => (await track.getLanguageCode()) === 'en',
+  });
+
+  const englishSubtitleTrack = englishSubtitleTracks[0];
+  if (!englishSubtitleTrack) {
+    return [];
+  }
+
+  return await englishSubtitleTrack.getSegments();
 }
 ```
 
