@@ -1,16 +1,29 @@
-import { HLS, Input as MediabunnyInput, InputTrack as MediabunnyInputTrack } from 'mediabunny';
+import {
+  HLS,
+  Input as MediabunnyInput,
+  InputTrack as MediabunnyInputTrack,
+  SourceRef,
+} from 'mediabunny';
 import type {
   InputAudioTrack as MediabunnyInputAudioTrack,
   EncodedPacket,
   MediaCodec,
   PacketType,
+  PathedSource,
+  TrackDisposition,
   InputVideoTrack as MediabunnyInputVideoTrack,
   Source,
 } from 'mediabunny';
 import type { HlsSegment, HlsSegmentedInput, InputTrackWithBacking } from './mediabunny';
 import type { DashSegment, DashSegmentedInput } from './dash/dash-segmented-input';
 import type { InputTrackQuery } from 'mediabunny';
-import { getHlsSubtitleTrackBackings, HlsSubtitleTrackBacking } from './hls/hls-subtitles';
+import {
+  ExternalSubtitleTrackBacking,
+  getHlsSubtitleTrackBackings,
+  HlsSubtitleTrackBacking,
+  type SourceWithRootPath,
+} from './hls/hls-subtitles';
+import type { SubtitleCodec } from './codec';
 
 declare module 'mediabunny' {
   interface Input<S extends Source = Source> {
@@ -27,13 +40,25 @@ type SegmentAccessMethods = {
 export type MediabunnyTrackWithSegments = MediabunnyInputTrack & SegmentAccessMethods;
 export type MediabunnyVideoTrackWithSegments = MediabunnyInputVideoTrack & SegmentAccessMethods;
 export type MediabunnyAudioTrackWithSegments = MediabunnyInputAudioTrack & SegmentAccessMethods;
+export type MediabunnySubtitleTrackWithSegments = MediabunnyInputSubtitleTrack &
+  SegmentAccessMethods;
 
-type NativeTrackBacking = Parameters<MediabunnyInput<Source>['_wrapBackingAsTrack']>[0];
+export type InputSubtitleSource = PathedSource | SourceRef<PathedSource>;
+export type InputSubtitleTrackMetadata = {
+  codec?: SubtitleCodec | null;
+  codecString?: string | null;
+  disposition?: Partial<TrackDisposition>;
+  languageCode?: string;
+  name?: string | null;
+  pairWith?: MediabunnyVideoTrackWithSegments | Iterable<MediabunnyVideoTrackWithSegments>;
+};
+
 type InternalInput<S extends Source = Source> = MediabunnyInput<S> & {
   _getTrackBackings(): Promise<NativeTrackBacking[]>;
   _getSyntheticTrackBackings?(
     type?: typeof BACKING_TYPE_VIDEO | typeof BACKING_TYPE_AUDIO | typeof BACKING_TYPE_SUBTITLE,
   ): Promise<TrackBacking[]>;
+  _sourceRefs: SourceRef[];
 };
 
 type SegmentableBacking = {
@@ -61,7 +86,13 @@ type SegmentableBacking = {
   getMetadataCodecParameterString?(): string | null | Promise<string | null>;
   getSegmentedInput?(): HlsSegmentedInput | DashSegmentedInput;
 };
+type NativeTrackBacking = SegmentableBacking;
 type TrackBacking = NativeTrackBacking | SegmentableBacking;
+
+const CUSTOM_SUBTITLE_TRACK_ID_OFFSET = 1_000_000_000;
+const CUSTOM_PAIRING_BIT_START = 1024n;
+const EXTRA_PAIRING_MASK = Symbol.for('dasha.extra-pairing-mask');
+const ORIGINAL_GET_PAIRING_MASK = Symbol.for('dasha.original-get-pairing-mask');
 
 const requireSync = <T>(value: T | Promise<T>, getterName: string, asyncName: string): T => {
   if (value instanceof Promise) {
@@ -128,8 +159,9 @@ const getTrackBackingsByType = async (
   input: InternalInput,
   type?: typeof BACKING_TYPE_VIDEO | typeof BACKING_TYPE_AUDIO | typeof BACKING_TYPE_SUBTITLE,
 ) => {
-  const nativeBackings = await input._getTrackBackings();
-  const syntheticBackings = (await input._getSyntheticTrackBackings?.(type)) ?? [];
+  const nativeBackings = (await input._getTrackBackings()) as TrackBacking[];
+  const syntheticBackings = ((await input._getSyntheticTrackBackings?.(type)) ??
+    []) as TrackBacking[];
   const backings = [...nativeBackings, ...syntheticBackings];
   return type ? backings.filter((backing) => getBackingType(backing) === type) : backings;
 };
@@ -252,13 +284,18 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
   #trackCache = new WeakMap<MediabunnyInputTrack, MediabunnyTrackWithSegments>();
   #subtitleTrackCache = new WeakMap<object, MediabunnyInputSubtitleTrack>();
   #hlsSubtitleBackingsPromise: Promise<HlsSubtitleTrackBacking[]> | null = null;
+  #customSubtitleBackings: ExternalSubtitleTrackBacking[] = [];
+  #nextCustomSubtitleTrackId = CUSTOM_SUBTITLE_TRACK_ID_OFFSET;
+  #nextCustomSubtitleTrackNumber = CUSTOM_SUBTITLE_TRACK_ID_OFFSET;
+  #nextPairingBitIndex: bigint | null = null;
 
   async #queryTracks<T extends MediabunnyInputTrack>(
     query: InputTrackQuery<T> | undefined,
     type?: typeof BACKING_TYPE_VIDEO | typeof BACKING_TYPE_AUDIO | typeof BACKING_TYPE_SUBTITLE,
   ) {
-    const backings = await getTrackBackingsByType(this as InternalInput<S>, type);
-    return queryWrappedTracks(this as InternalInput<S>, backings, query);
+    const internalInput = this as unknown as InternalInput<S>;
+    const backings = await getTrackBackingsByType(internalInput, type);
+    return queryWrappedTracks(internalInput, backings, query);
   }
 
   override _wrapBackingAsTrack(backing: TrackBacking): MediabunnyTrackWithSegments {
@@ -281,8 +318,9 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
       return [];
     }
 
+    const backings = [...this.#customSubtitleBackings];
     if ((await this.getFormat()) !== HLS) {
-      return [];
+      return backings;
     }
 
     if (!this.#hlsSubtitleBackingsPromise) {
@@ -295,7 +333,7 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
       this.#hlsSubtitleBackingsPromise = promise;
     }
 
-    return this.#hlsSubtitleBackingsPromise;
+    return [...backings, ...(await this.#hlsSubtitleBackingsPromise)];
   }
 
   #wrapSubtitleBacking(backing: SegmentableBacking) {
@@ -325,6 +363,13 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     )) as MediabunnyAudioTrackWithSegments[];
   }
 
+  async getSubtitleTracks(query?: InputTrackQuery<MediabunnySubtitleTrackWithSegments>) {
+    return (await this.#queryTracks(
+      query,
+      BACKING_TYPE_SUBTITLE,
+    )) as MediabunnySubtitleTrackWithSegments[];
+  }
+
   override async getPrimaryVideoTrack(query?: InputTrackQuery<MediabunnyVideoTrackWithSegments>) {
     return (await super.getPrimaryVideoTrack(
       query as never,
@@ -335,5 +380,137 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     return (await super.getPrimaryAudioTrack(
       query as never,
     )) as MediabunnyAudioTrackWithSegments | null;
+  }
+
+  addSubtitleTrack(
+    source: InputSubtitleSource,
+    metadata: InputSubtitleTrackMetadata = {},
+  ): MediabunnySubtitleTrackWithSegments {
+    const pathedSource = this.#takeSubtitleSourceRef(source);
+    const sourceWithRootPath = pathedSource.source as SourceWithRootPath;
+    if (typeof sourceWithRootPath.rootPath !== 'string') {
+      throw new TypeError('source must provide a string rootPath.');
+    }
+
+    const pairWith = this.#toPairableVideoTracks(metadata.pairWith);
+    const backing = new ExternalSubtitleTrackBacking({
+      id: this.#nextCustomSubtitleTrackId++,
+      number: this.#nextCustomSubtitleTrackNumber++,
+      pairingMask: 0n,
+      source: sourceWithRootPath,
+      codec: metadata.codec,
+      codecString: metadata.codecString,
+      disposition: metadata.disposition,
+      languageCode: metadata.languageCode,
+      name: metadata.name,
+    });
+
+    this.#pairSubtitleBacking(backing, pairWith);
+    this.#customSubtitleBackings.push(backing);
+    return this._wrapBackingAsTrack(backing) as MediabunnySubtitleTrackWithSegments;
+  }
+
+  #takeSubtitleSourceRef(source: InputSubtitleSource) {
+    const rawSource = source instanceof SourceRef ? source.source : source;
+    if (
+      !(rawSource instanceof Object) ||
+      !('rootPath' in rawSource) ||
+      !('ref' in rawSource) ||
+      typeof rawSource.ref !== 'function'
+    ) {
+      throw new TypeError('source must be a pathed source such as UrlSource or FilePathSource.');
+    }
+
+    const ref = rawSource.ref() as SourceRef<PathedSource>;
+    (this as unknown as InternalInput<S>)._sourceRefs.push(ref);
+    return ref;
+  }
+
+  #toPairableVideoTracks(
+    pairWith:
+      | MediabunnyVideoTrackWithSegments
+      | Iterable<MediabunnyVideoTrackWithSegments>
+      | undefined,
+  ) {
+    if (!pairWith) {
+      return [];
+    }
+
+    const tracks = this.#isIterable(pairWith) ? [...pairWith] : [pairWith];
+    for (const track of tracks) {
+      if (track.input !== this) {
+        throw new TypeError('pairWith tracks must belong to the same input instance.');
+      }
+      if (track.type !== 'video') {
+        throw new TypeError('pairWith only accepts video tracks.');
+      }
+    }
+    return tracks;
+  }
+
+  #isIterable<T>(value: Iterable<T> | T): value is Iterable<T> {
+    return typeof value === 'object' && value !== null && Symbol.iterator in value;
+  }
+
+  #pairSubtitleBacking(
+    subtitleBacking: ExternalSubtitleTrackBacking,
+    videoTracks: MediabunnyVideoTrackWithSegments[],
+  ) {
+    for (const track of videoTracks) {
+      const bit = this.#allocatePairingBit();
+      this.#appendPairingMask(subtitleBacking as TrackBacking, bit);
+      this.#appendPairingMask(
+        (track as unknown as MediabunnyInputTrack & { _backing: TrackBacking })._backing,
+        bit,
+      );
+    }
+  }
+
+  #allocatePairingBit() {
+    const nextIndex = this.#nextPairingBitIndex ?? this.#getInitialPairingBitIndex();
+    this.#nextPairingBitIndex = nextIndex + 1n;
+    return 1n << nextIndex;
+  }
+
+  #getInitialPairingBitIndex() {
+    const internalInput = this as unknown as InternalInput<S> & {
+      _trackBackingsCache?: NativeTrackBacking[] | null;
+    };
+    const loadedBackings: TrackBacking[] = [...(internalInput._trackBackingsCache ?? [])];
+    let maxBitIndex = -1n;
+
+    for (const backing of [...loadedBackings, ...this.#customSubtitleBackings]) {
+      const mask = backing.getPairingMask?.() ?? 0n;
+      if (mask === 0n) {
+        continue;
+      }
+
+      const bitIndex = BigInt(mask.toString(2).length - 1);
+      if (bitIndex > maxBitIndex) {
+        maxBitIndex = bitIndex;
+      }
+    }
+
+    return maxBitIndex >= 0n ? maxBitIndex + 1n : CUSTOM_PAIRING_BIT_START;
+  }
+
+  #appendPairingMask(backing: TrackBacking, mask: bigint) {
+    const patchedBacking = backing as TrackBacking & {
+      [EXTRA_PAIRING_MASK]?: bigint;
+      [ORIGINAL_GET_PAIRING_MASK]?: () => bigint;
+    };
+
+    patchedBacking[EXTRA_PAIRING_MASK] = (patchedBacking[EXTRA_PAIRING_MASK] ?? 0n) | mask;
+    if (patchedBacking[ORIGINAL_GET_PAIRING_MASK]) {
+      return;
+    }
+
+    const originalGetPairingMask = backing.getPairingMask?.bind(backing) ?? (() => 0n);
+    patchedBacking[ORIGINAL_GET_PAIRING_MASK] = originalGetPairingMask;
+    Object.assign(backing, {
+      getPairingMask: () =>
+        (patchedBacking[ORIGINAL_GET_PAIRING_MASK]?.() ?? 0n) |
+        (patchedBacking[EXTRA_PAIRING_MASK] ?? 0n),
+    });
   }
 }

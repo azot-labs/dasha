@@ -25,7 +25,7 @@ const TAG_PLAYLIST_TYPE = '#EXT-X-PLAYLIST-TYPE:';
 const AES_128_BLOCK_SIZE = 16;
 const IV_STRING_REGEX = /^0[xX][0-9a-fA-F]+$/;
 
-const DEFAULT_TRACK_DISPOSITION: TrackDisposition = {
+export const DEFAULT_TRACK_DISPOSITION: TrackDisposition = {
   commentary: false,
   default: true,
   forced: false,
@@ -35,7 +35,7 @@ const DEFAULT_TRACK_DISPOSITION: TrackDisposition = {
   visuallyImpaired: false,
 };
 
-type SourceWithRootPath = {
+export type SourceWithRootPath = {
   rootPath: string;
   _options?: { requestInit?: RequestInit };
   _url?: string | URL | Request;
@@ -258,7 +258,7 @@ const loadPlaylistText = async (source: SourceWithRootPath, path: string) => {
   };
 };
 
-const detectSubtitleCodecFromUri = async (source: SourceWithRootPath, uri: string) => {
+export const detectSubtitleCodecFromUri = async (source: SourceWithRootPath, uri: string) => {
   const fromPath = parseDetectedSubtitleCodec(inferSubtitleCodecStringFromPath(uri));
   if (fromPath) {
     return fromPath;
@@ -359,7 +359,7 @@ const createSequenceIv = (sequenceNumber: number) => {
   return iv;
 };
 
-class HlsSubtitlePlaylist implements HlsSegmentedInput {
+export class HlsSubtitlePlaylist implements HlsSegmentedInput {
   segments: HlsSegment[] = [];
   #source: SourceWithRootPath;
   #playlistPath: string;
@@ -656,6 +656,97 @@ class HlsSubtitlePlaylist implements HlsSegmentedInput {
   }
 }
 
+class ExternalSubtitleSegmentedInput implements HlsSegmentedInput {
+  segments: HlsSegment[] = [];
+  #source: SourceWithRootPath;
+  #rootPath: string;
+  #delegate:
+    | (HlsSegmentedInput & {
+        getDurationFromMetadata(options: DurationMetadataRequestOptions): Promise<number | null>;
+        getLiveRefreshInterval(): Promise<number | null>;
+        isRelativeToUnixEpoch(): Promise<boolean>;
+      })
+    | null = null;
+  #loadPromise: Promise<void> | null = null;
+
+  constructor(source: SourceWithRootPath, rootPath: string) {
+    this.#source = source;
+    this.#rootPath = rootPath;
+  }
+
+  runUpdateSegments() {
+    return (this.#loadPromise ??= (async () => {
+      if (this.#delegate) {
+        await this.#delegate.runUpdateSegments();
+        this.segments = this.#delegate.segments;
+        return;
+      }
+
+      const loaded = await loadPlaylistText(this.#source, this.#rootPath);
+      const lines = splitPlaylistLines(loaded.text);
+
+      if (lines[0] === '#EXTM3U') {
+        this.#delegate = new HlsSubtitlePlaylist(this.#source, loaded.path);
+        await this.#delegate.runUpdateSegments();
+        this.segments = this.#delegate.segments;
+        return;
+      }
+
+      const segment: HlsSegment = {
+        timestamp: 0,
+        duration: 0,
+        relativeToUnixEpoch: false,
+        firstSegment: null,
+        sequenceNumber: 0,
+        location: {
+          path: toSegmentPath(loaded.path),
+          offset: 0,
+          length: null,
+        },
+        encryption: null,
+        initSegment: null,
+        lastProgramDateTimeSeconds: null,
+      };
+
+      segment.firstSegment = segment;
+      this.segments = [segment];
+      this.#delegate = {
+        segments: this.segments,
+        runUpdateSegments: async () => {},
+        getDurationFromMetadata: async (_options) => null,
+        getLiveRefreshInterval: async () => null,
+        isRelativeToUnixEpoch: async () => false,
+      };
+    })().finally(() => {
+      this.#loadPromise = null;
+    }));
+  }
+
+  async getDurationFromMetadata(options: DurationMetadataRequestOptions) {
+    await this.runUpdateSegments();
+    if (this.#delegate) {
+      return this.#delegate.getDurationFromMetadata(options);
+    }
+    return null;
+  }
+
+  async getLiveRefreshInterval() {
+    await this.runUpdateSegments();
+    if (this.#delegate) {
+      return this.#delegate.getLiveRefreshInterval();
+    }
+    return null;
+  }
+
+  async isRelativeToUnixEpoch() {
+    await this.runUpdateSegments();
+    if (this.#delegate) {
+      return this.#delegate.isRelativeToUnixEpoch();
+    }
+    return false;
+  }
+}
+
 export class HlsSubtitleTrackBacking {
   #id: number;
   #number: number;
@@ -753,6 +844,173 @@ export class HlsSubtitleTrackBacking {
 
   getMetadataCodecParameterString() {
     return this.#track.codecString;
+  }
+
+  async getFirstPacket(_options: unknown): Promise<EncodedPacket | null> {
+    return null;
+  }
+
+  async getPacket(_timestamp: number, _options: unknown): Promise<EncodedPacket | null> {
+    return null;
+  }
+
+  async getNextPacket(_packet: EncodedPacket, _options: unknown): Promise<EncodedPacket | null> {
+    return null;
+  }
+
+  async getKeyPacket(_timestamp: number, _options: unknown): Promise<EncodedPacket | null> {
+    return null;
+  }
+
+  async getNextKeyPacket(_packet: EncodedPacket, _options: unknown): Promise<EncodedPacket | null> {
+    return null;
+  }
+
+  getSegmentedInput() {
+    return this.#segmentedInput;
+  }
+}
+
+export class ExternalSubtitleTrackBacking {
+  #id: number;
+  #number: number;
+  #pairingMask: bigint;
+  #source: SourceWithRootPath;
+  #segmentedInput: ExternalSubtitleSegmentedInput;
+  #languageCode: string;
+  #name: string | null;
+  #disposition: TrackDisposition;
+  #codec: SubtitleCodec | null | undefined;
+  #codecString: string | null | undefined;
+  #codecInfoPromise: Promise<{
+    codec: SubtitleCodec;
+    codecString: string;
+  }> | null = null;
+
+  constructor(params: {
+    id: number;
+    number: number;
+    pairingMask: bigint;
+    source: SourceWithRootPath;
+    codec?: SubtitleCodec | null;
+    codecString?: string | null;
+    languageCode?: string;
+    name?: string | null;
+    disposition?: Partial<TrackDisposition>;
+  }) {
+    this.#id = params.id;
+    this.#number = params.number;
+    this.#pairingMask = params.pairingMask;
+    this.#source = params.source;
+    this.#segmentedInput = new ExternalSubtitleSegmentedInput(
+      params.source,
+      params.source.rootPath,
+    );
+    this.#languageCode = params.languageCode ?? 'und';
+    this.#name = params.name ?? null;
+    this.#codec = params.codec ?? tryParseSubtitleCodec(params.codecString ?? '') ?? undefined;
+    this.#codecString = params.codecString ?? params.codec ?? undefined;
+    this.#disposition = {
+      ...DEFAULT_TRACK_DISPOSITION,
+      ...params.disposition,
+    };
+  }
+
+  getType() {
+    return 'subtitle' as const;
+  }
+
+  getId() {
+    return this.#id;
+  }
+
+  getNumber() {
+    return this.#number;
+  }
+
+  async #getCodecInfo() {
+    if (this.#codec !== undefined && this.#codecString !== undefined) {
+      return {
+        codec: this.#codec,
+        codecString: this.#codecString,
+      };
+    }
+
+    const info = await (this.#codecInfoPromise ??= detectSubtitleCodecFromUri(
+      this.#source,
+      this.#source.rootPath,
+    ));
+    this.#codec = info.codec;
+    this.#codecString = info.codecString;
+    return info;
+  }
+
+  getCodec() {
+    if (this.#codec !== undefined) {
+      return this.#codec as never;
+    }
+
+    return this.#getCodecInfo().then((info) => info.codec as never);
+  }
+
+  getInternalCodecId() {
+    return null;
+  }
+
+  getName() {
+    return this.#name;
+  }
+
+  getLanguageCode() {
+    return this.#languageCode;
+  }
+
+  getTimeResolution() {
+    return 1000;
+  }
+
+  isRelativeToUnixEpoch() {
+    return this.#segmentedInput.isRelativeToUnixEpoch();
+  }
+
+  getDisposition() {
+    return this.#disposition;
+  }
+
+  getPairingMask() {
+    return this.#pairingMask;
+  }
+
+  getBitrate() {
+    return null;
+  }
+
+  getAverageBitrate() {
+    return null;
+  }
+
+  getDurationFromMetadata(options: DurationMetadataRequestOptions) {
+    return this.#segmentedInput.getDurationFromMetadata(options);
+  }
+
+  getLiveRefreshInterval() {
+    return this.#segmentedInput.getLiveRefreshInterval();
+  }
+
+  getHasOnlyKeyPackets() {
+    return true;
+  }
+
+  async getDecoderConfig() {
+    return null;
+  }
+
+  async getMetadataCodecParameterString() {
+    if (this.#codecString !== undefined) {
+      return this.#codecString;
+    }
+
+    return this.#getCodecInfo().then((info) => info.codecString);
   }
 
   async getFirstPacket(_options: unknown): Promise<EncodedPacket | null> {

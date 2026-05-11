@@ -6,8 +6,11 @@ import type { DashSegment, DashSegmentedInput } from './dash/dash-segmented-inpu
 import {
   SegmentedMediabunnyInput,
   type MediabunnyAudioTrackWithSegments,
+  type MediabunnySubtitleTrackWithSegments,
   type MediabunnyTrackWithSegments,
   type MediabunnyVideoTrackWithSegments,
+  type InputSubtitleSource,
+  type InputSubtitleTrackMetadata,
   preserveSubtitleBackingsOnInput,
 } from './mediabunny-input';
 
@@ -20,6 +23,7 @@ export type InputSegmentedInput = HlsSegmentedInput | DashSegmentedInput;
 export type InputTrack = MediabunnyTrackWithSegments;
 export type InputVideoTrack = MediabunnyVideoTrackWithSegments;
 export type InputAudioTrack = MediabunnyAudioTrackWithSegments;
+export type InputSubtitleTrack = MediabunnySubtitleTrackWithSegments;
 
 export class Input<S extends Source = Source> extends SegmentedMediabunnyInput<S> {
   constructor(options: DashaInputOptions<S>) {
@@ -38,6 +42,7 @@ export const getSegments = async (track: InputTrack): Promise<InputSegment[]> =>
 export { FilePathSource, UrlSource, HLS_FORMATS, DASH, DASH_FORMATS, desc, asc, prefer };
 export { preserveSubtitleBackingsOnInput };
 export type { MediaCodec, SubtitleCodec } from './codec';
+export type { InputSubtitleSource, InputSubtitleTrackMetadata };
 export type {
   HlsSegment,
   HlsSegmentedInput,
