@@ -2,6 +2,7 @@ import {
   HLS,
   Input as MediabunnyInput,
   InputTrack as MediabunnyInputTrack,
+  InputVideoTrack as MediabunnyInputVideoTrackClass,
   SourceRef,
 } from 'mediabunny';
 import type {
@@ -23,10 +24,12 @@ import {
   HlsSubtitleTrackBacking,
   type SourceWithRootPath,
 } from './hls/hls-subtitles';
-import type { SubtitleCodec } from './codec';
+import type { SubtitleCodec, VideoDynamicRange } from './codec';
+import { inferDynamicRange } from './video';
 
 declare module 'mediabunny' {
   interface Input<S extends Source = Source> {
+    _getDemuxer(): Promise<unknown>;
     _getTrackBackings(): Promise<unknown[]>;
     _wrapBackingAsTrack(backing: unknown): MediabunnyInputTrack;
   }
@@ -37,10 +40,18 @@ type SegmentAccessMethods = {
   getSegments(): Promise<(HlsSegment | DashSegment)[]>;
 };
 
+type VideoDynamicRangeMethods = {
+  getDynamicRange(): Promise<VideoDynamicRange>;
+};
+
+type MediabunnySubtitleTrackLike = MediabunnyInputTrack & {
+  type: 'subtitle';
+};
+
 export type InputTrack = MediabunnyInputTrack & SegmentAccessMethods;
-export type InputVideoTrack = MediabunnyInputVideoTrack & SegmentAccessMethods;
+export type InputVideoTrack = MediabunnyInputVideoTrack & SegmentAccessMethods & VideoDynamicRangeMethods;
 export type InputAudioTrack = MediabunnyInputAudioTrack & SegmentAccessMethods;
-export type InputSubtitleTrack = MediabunnyInputSubtitleTrack & SegmentAccessMethods;
+export type InputSubtitleTrack = MediabunnySubtitleTrackLike & SegmentAccessMethods;
 
 export type InputSubtitleSource = PathedSource | SourceRef<PathedSource>;
 export type InputSubtitleTrackMetadata = {
@@ -92,6 +103,203 @@ const CUSTOM_SUBTITLE_TRACK_ID_OFFSET = 1_000_000_000;
 const CUSTOM_PAIRING_BIT_START = 1024n;
 const EXTRA_PAIRING_MASK = Symbol.for('dasha.extra-pairing-mask');
 const ORIGINAL_GET_PAIRING_MASK = Symbol.for('dasha.original-get-pairing-mask');
+const HLS_VARIANT_INF_LINE = '#EXT-X-STREAM-INF:';
+const HLS_DEMUXER_PATCHED = Symbol.for('dasha.hls-demuxer-patched');
+const HLS_DEMUXER_METADATA_PATCH = Symbol.for('dasha.hls-demuxer-metadata-patch');
+const HLS_VIDEO_RANGE_APPLIED = Symbol.for('dasha.hls-video-range-applied');
+
+class HlsAttributeList {
+  #attributes: Record<string, string> = {};
+
+  constructor(str: string) {
+    let key = '';
+    let value = '';
+    let inValue = false;
+    let inQuotes = false;
+
+    for (const char of str) {
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === '=' && !inValue && !inQuotes) {
+        inValue = true;
+      } else if (char === ',' && !inQuotes) {
+        if (key) {
+          this.#attributes[key.trim().toLowerCase()] = value;
+        }
+
+        key = '';
+        value = '';
+        inValue = false;
+      } else if (inValue) {
+        value += char;
+      } else {
+        key += char;
+      }
+    }
+
+    if (key) {
+      this.#attributes[key.trim().toLowerCase()] = value;
+    }
+  }
+
+  get(name: string) {
+    return this.#attributes[name.toLowerCase()] ?? null;
+  }
+}
+
+const extractHlsVideoRanges = (text: string) => {
+  const lines = text.split(/\r?\n/);
+  const videoRanges: (string | null)[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line.startsWith(HLS_VARIANT_INF_LINE)) {
+      continue;
+    }
+
+    const attributes = new HlsAttributeList(line.slice(HLS_VARIANT_INF_LINE.length));
+    videoRanges.push(attributes.get('video-range'));
+  }
+
+  return videoRanges;
+};
+
+const getPairingMaskIndexes = (pairingMask: bigint) => {
+  const indexes: number[] = [];
+  let value = pairingMask;
+  let index = 0;
+
+  while (value > 0n) {
+    if ((value & 1n) === 1n) {
+      indexes.push(index);
+    }
+    value >>= 1n;
+    index++;
+  }
+
+  return indexes;
+};
+
+const applyHlsVideoRangeMetadata = async (demuxer: {
+  hasMasterPlaylist?: boolean;
+  input?: { _reader?: { requestEntireFile(): Promise<Uint8Array | { data: Uint8Array } | null> } };
+  internalTracks?: {
+    pairingMask: bigint;
+    info: { type: string };
+    videoRange?: string | null;
+  }[] | null;
+  [HLS_VIDEO_RANGE_APPLIED]?: boolean;
+}) => {
+  if (demuxer[HLS_VIDEO_RANGE_APPLIED] || !demuxer.hasMasterPlaylist || !demuxer.internalTracks?.length) {
+    demuxer[HLS_VIDEO_RANGE_APPLIED] = true;
+    return;
+  }
+
+  const slice = await demuxer.input?._reader?.requestEntireFile();
+  if (!slice) {
+    demuxer[HLS_VIDEO_RANGE_APPLIED] = true;
+    return;
+  }
+
+  const bytes = (
+    slice instanceof Uint8Array ? slice : 'bytes' in slice ? slice.bytes : slice.data
+  ) as Uint8Array;
+  const videoRanges = extractHlsVideoRanges(new TextDecoder().decode(bytes));
+  if (!videoRanges.length) {
+    demuxer[HLS_VIDEO_RANGE_APPLIED] = true;
+    return;
+  }
+
+  for (const track of demuxer.internalTracks) {
+    if (track.info.type !== 'video') {
+      continue;
+    }
+
+    const matchedRanges = getPairingMaskIndexes(track.pairingMask)
+      .map((index) => videoRanges[index] ?? null)
+      .filter((value): value is string => value != null);
+    const uniqueRanges = [...new Set(matchedRanges)];
+
+    track.videoRange = uniqueRanges.length === 1 ? uniqueRanges[0]! : null;
+  }
+
+  demuxer[HLS_VIDEO_RANGE_APPLIED] = true;
+};
+
+const patchHlsDemuxer = (demuxer: unknown) => {
+  if (
+    !(demuxer instanceof Object) ||
+    !('readMetadata' in demuxer) ||
+    typeof demuxer.readMetadata !== 'function' ||
+    !('input' in demuxer) ||
+    (demuxer as { [HLS_DEMUXER_PATCHED]?: boolean })[HLS_DEMUXER_PATCHED]
+  ) {
+    return demuxer;
+  }
+
+  const candidate = demuxer as {
+    readMetadata(): Promise<unknown>;
+    hasMasterPlaylist?: boolean;
+    [HLS_DEMUXER_PATCHED]?: boolean;
+    [HLS_DEMUXER_METADATA_PATCH]?: Promise<unknown>;
+  };
+
+  if (candidate.constructor?.name !== 'HlsDemuxer') {
+    return demuxer;
+  }
+
+  const originalReadMetadata = candidate.readMetadata.bind(candidate);
+  candidate.readMetadata = () => {
+    if (candidate[HLS_DEMUXER_METADATA_PATCH]) {
+      return candidate[HLS_DEMUXER_METADATA_PATCH]!;
+    }
+
+    const promise = Promise.resolve(originalReadMetadata()).then(() =>
+      applyHlsVideoRangeMetadata(candidate),
+    );
+    candidate[HLS_DEMUXER_METADATA_PATCH] = promise.catch((error) => {
+      if (candidate[HLS_DEMUXER_METADATA_PATCH] === promise) {
+        candidate[HLS_DEMUXER_METADATA_PATCH] = undefined;
+      }
+      throw error;
+    });
+    return candidate[HLS_DEMUXER_METADATA_PATCH]!;
+  };
+  candidate[HLS_DEMUXER_PATCHED] = true;
+  return demuxer;
+};
+
+const getDynamicRangeForTrack = async (track: MediabunnyInputVideoTrack): Promise<VideoDynamicRange> => {
+  const backing = (track as MediabunnyInputVideoTrack & {
+    _backing?: {
+      internalTrack?: {
+        track?: { dynamicRange?: VideoDynamicRange };
+        videoRange?: string | null;
+      };
+    };
+  })._backing;
+  const manifestDynamicRange = backing?.internalTrack?.track?.dynamicRange;
+  if (manifestDynamicRange) {
+    return manifestDynamicRange;
+  }
+
+  const codecString = await track.getCodecParameterString().catch(() => null);
+  const videoRange = backing?.internalTrack?.videoRange ?? null;
+
+  const fromMetadata = inferDynamicRange({
+    codecs: codecString,
+    videoRange,
+  });
+  if (fromMetadata !== 'sdr' || videoRange != null) {
+    return fromMetadata;
+  }
+
+  return inferDynamicRange({
+    codecs: codecString,
+    colorSpace: await track.getColorSpace().catch(() => null),
+    videoRange,
+  });
+};
 
 const requireSync = <T>(value: T | Promise<T>, getterName: string, asyncName: string): T => {
   if (value instanceof Promise) {
@@ -194,6 +402,11 @@ const patchBaseMediabunnyInput = () => {
     );
   };
 
+  const originalGetDemuxer = prototype._getDemuxer;
+  prototype._getDemuxer = function () {
+    return originalGetDemuxer.call(this).then((demuxer: unknown) => patchHlsDemuxer(demuxer));
+  };
+
   prototype[BASE_INPUT_PATCHED] = true;
 };
 
@@ -215,6 +428,10 @@ const getSegmentedInputForTrack = (
 const addSegmentAccess = <T extends MediabunnyInputTrack>(track: T): T & SegmentAccessMethods =>
   new Proxy(track, {
     get(target, prop) {
+      if (prop === 'getDynamicRange' && target instanceof MediabunnyInputVideoTrackClass) {
+        return () => getDynamicRangeForTrack(target);
+      }
+
       if (prop === 'getSegmentedInput') {
         return () => getSegmentedInputForTrack(target);
       }
