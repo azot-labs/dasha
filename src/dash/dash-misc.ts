@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { Element } from '@xmldom/xmldom';
+import type { Element } from '@xmldom/xmldom';
 import type { Source } from 'mediabunny';
 import { combineUrl } from '../util';
 import type { MediaCodec, VideoDynamicRange } from '../codec';
