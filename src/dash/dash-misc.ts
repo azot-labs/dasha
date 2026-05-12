@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import type { Element } from '@xmldom/xmldom';
 import type { Source } from 'mediabunny';
 import { combineUrl } from '../util';
 import type { MediaCodec, VideoDynamicRange } from '../codec';
@@ -7,6 +6,8 @@ import { tryParseVideoCodec } from '../video';
 import { tryParseSubtitleCodec } from '../subtitle';
 import { tryParseAudioCodec } from '../audio';
 import type { RoleType } from '../role-type';
+
+export type Element = import('@xmldom/xmldom').Element;
 
 export const DASH_MIME_TYPE = 'application/dash+xml';
 export const DASH_TEMPLATE_REPRESENTATION_ID = '$RepresentationID$';

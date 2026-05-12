@@ -1,4 +1,4 @@
-import { DOMParser, type Element } from '@xmldom/xmldom';
+import { DOMParser } from '@xmldom/xmldom';
 import { Temporal } from 'temporal-polyfill';
 import { ADTS, InputFormat, MATROSKA, MP3, MP4, QTFF, WEBM } from 'mediabunny';
 import type {
@@ -41,6 +41,7 @@ import {
   loadDashManifest,
   parseDashRange,
   replaceDashVariables,
+  type Element,
 } from './dash-misc';
 import { type DashSegment, DashSegmentedInput } from './dash-segmented-input';
 
