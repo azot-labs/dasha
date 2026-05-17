@@ -131,6 +131,30 @@ async function getEnglishSubtitles() {
 }
 ```
 
+### Overriding track metadata
+
+Some services expose track metadata outside the manifest. You can override the parsed language code on any dasha track, and the updated value will be visible through the regular query/filter APIs.
+
+```ts
+import { DASH_FORMATS, Input, UrlSource } from 'dasha';
+
+async function getFrenchAudioTrack() {
+  const input = new Input({
+    source: new UrlSource('https://example.com/manifest.mpd'),
+    formats: DASH_FORMATS,
+  });
+
+  const audioTracks = await input.getAudioTracks();
+  const apiLanguageCode = 'fr';
+
+  audioTracks[0]?.setLanguageCode(apiLanguageCode);
+
+  return await input.getAudioTracks({
+    filter: async (track) => (await track.getLanguageCode()) === apiLanguageCode,
+  });
+}
+```
+
 ### Mediabunny with DASH support
 
 > Only reading is supported
