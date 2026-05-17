@@ -40,6 +40,10 @@ type SegmentAccessMethods = {
   getSegments(): Promise<(HlsSegment | DashSegment)[]>;
 };
 
+type TrackMetadataOverrideMethods = {
+  setLanguageCode(value: string): void;
+};
+
 type VideoDynamicRangeMethods = {
   getDynamicRange(): Promise<VideoDynamicRange>;
 };
@@ -48,10 +52,17 @@ type MediabunnySubtitleTrackLike = MediabunnyInputTrack & {
   type: 'subtitle';
 };
 
-export type InputTrack = MediabunnyInputTrack & SegmentAccessMethods;
-export type InputVideoTrack = MediabunnyInputVideoTrack & SegmentAccessMethods & VideoDynamicRangeMethods;
-export type InputAudioTrack = MediabunnyInputAudioTrack & SegmentAccessMethods;
-export type InputSubtitleTrack = MediabunnySubtitleTrackLike & SegmentAccessMethods;
+export type InputTrack = MediabunnyInputTrack & SegmentAccessMethods & TrackMetadataOverrideMethods;
+export type InputVideoTrack = MediabunnyInputVideoTrack &
+  SegmentAccessMethods &
+  VideoDynamicRangeMethods &
+  TrackMetadataOverrideMethods;
+export type InputAudioTrack = MediabunnyInputAudioTrack &
+  SegmentAccessMethods &
+  TrackMetadataOverrideMethods;
+export type InputSubtitleTrack = MediabunnySubtitleTrackLike &
+  SegmentAccessMethods &
+  TrackMetadataOverrideMethods;
 
 export type InputSubtitleSource = PathedSource | SourceRef<PathedSource>;
 export type InputSubtitleTrackMetadata = {
@@ -103,10 +114,21 @@ const CUSTOM_SUBTITLE_TRACK_ID_OFFSET = 1_000_000_000;
 const CUSTOM_PAIRING_BIT_START = 1024n;
 const EXTRA_PAIRING_MASK = Symbol.for('dasha.extra-pairing-mask');
 const ORIGINAL_GET_PAIRING_MASK = Symbol.for('dasha.original-get-pairing-mask');
+const TRACK_METADATA_OVERRIDES = Symbol.for('dasha.track-metadata-overrides');
+const ORIGINAL_GET_LANGUAGE_CODE = Symbol.for('dasha.original-get-language-code');
 const HLS_VARIANT_INF_LINE = '#EXT-X-STREAM-INF:';
 const HLS_DEMUXER_PATCHED = Symbol.for('dasha.hls-demuxer-patched');
 const HLS_DEMUXER_METADATA_PATCH = Symbol.for('dasha.hls-demuxer-metadata-patch');
 const HLS_VIDEO_RANGE_APPLIED = Symbol.for('dasha.hls-video-range-applied');
+
+type TrackMetadataOverrides = {
+  languageCode?: string;
+};
+
+type OverridableTrackBacking = SegmentableBacking & {
+  [TRACK_METADATA_OVERRIDES]?: TrackMetadataOverrides;
+  [ORIGINAL_GET_LANGUAGE_CODE]?: NonNullable<SegmentableBacking['getLanguageCode']>;
+};
 
 class HlsAttributeList {
   #attributes: Record<string, string> = {};
@@ -413,9 +435,7 @@ const patchBaseMediabunnyInput = () => {
 const getSegmentedInputForTrack = (
   track: MediabunnyInputTrack,
 ): HlsSegmentedInput | DashSegmentedInput => {
-  const backing = (track as InputTrackWithBacking)._backing as
-    | InputTrackWithBacking['_backing']
-    | SegmentableBacking;
+  const backing = getTrackBacking(track);
   if ('getSegmentedInput' in backing && typeof backing.getSegmentedInput === 'function') {
     return backing.getSegmentedInput();
   }
@@ -425,11 +445,46 @@ const getSegmentedInputForTrack = (
   return internalTrack.demuxer.getSegmentedInputForPath(internalTrack.fullPath);
 };
 
-const addSegmentAccess = <T extends MediabunnyInputTrack>(track: T): T & SegmentAccessMethods =>
+const getTrackBacking = (
+  track: MediabunnyInputTrack,
+): InputTrackWithBacking['_backing'] | SegmentableBacking =>
+  (track as InputTrackWithBacking)._backing as InputTrackWithBacking['_backing'] | SegmentableBacking;
+
+const getTrackMetadataOverrides = (backing: OverridableTrackBacking) =>
+  (backing[TRACK_METADATA_OVERRIDES] ??= {});
+
+const ensureLanguageCodeOverridePatch = (backing: SegmentableBacking) => {
+  const patchedBacking = backing as OverridableTrackBacking;
+  if (patchedBacking[ORIGINAL_GET_LANGUAGE_CODE]) {
+    return patchedBacking;
+  }
+
+  const originalGetLanguageCode = backing.getLanguageCode?.bind(backing) ?? (() => 'und');
+  patchedBacking[ORIGINAL_GET_LANGUAGE_CODE] = originalGetLanguageCode;
+  Object.assign(backing, {
+    getLanguageCode: () =>
+      getTrackMetadataOverrides(patchedBacking).languageCode ??
+      (patchedBacking[ORIGINAL_GET_LANGUAGE_CODE]?.() ?? 'und'),
+  });
+  return patchedBacking;
+};
+
+const setTrackLanguageCode = (track: MediabunnyInputTrack, value: string) => {
+  getTrackMetadataOverrides(ensureLanguageCodeOverridePatch(getTrackBacking(track) as SegmentableBacking))
+    .languageCode = value;
+};
+
+const addSegmentAccess = <T extends MediabunnyInputTrack>(
+  track: T,
+): T & SegmentAccessMethods & TrackMetadataOverrideMethods =>
   new Proxy(track, {
     get(target, prop) {
       if (prop === 'getDynamicRange' && target instanceof MediabunnyInputVideoTrackClass) {
         return () => getDynamicRangeForTrack(target);
+      }
+
+      if (prop === 'setLanguageCode') {
+        return (value: string) => setTrackLanguageCode(target, value);
       }
 
       if (prop === 'getSegmentedInput') {
@@ -447,7 +502,7 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(track: T): T & Segment
       const value = Reflect.get(target, prop, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
-  }) as T & SegmentAccessMethods;
+  }) as T & SegmentAccessMethods & TrackMetadataOverrideMethods;
 
 class MediabunnyInputSubtitleTrack extends MediabunnyInputTrack {
   #backing: SegmentableBacking;
