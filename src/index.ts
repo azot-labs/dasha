@@ -30,9 +30,6 @@ export class Input<S extends Source = Source> extends SegmentedMediabunnyInput<S
 
 export const isInput = (value: unknown): value is Input => value instanceof Input;
 
-export const getSegmentedInput = (track: InputTrack): InputSegmentedInput =>
-  track.getSegmentedInput();
-
 const ALL_FORMATS = [...ALL_MEDIABUNNY_FORMATS, DASH];
 
 export { DASH, DASH_FORMATS, ALL_FORMATS };
