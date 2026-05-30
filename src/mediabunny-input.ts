@@ -38,6 +38,7 @@ declare module 'mediabunny' {
 type SegmentAccessMethods = {
   getSegmentedInput(): HlsSegmentedInput | DashSegmentedInput;
   getSegments(): Promise<(HlsSegment | DashSegment)[]>;
+  refreshSegments(): Promise<(HlsSegment | DashSegment)[]>;
 };
 
 type TrackMetadataOverrideMethods = {
@@ -492,6 +493,16 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(
       }
 
       if (prop === 'getSegments') {
+        return async () => {
+          const segmentedInput = getSegmentedInputForTrack(target);
+          if (segmentedInput.segments.length === 0) {
+            await segmentedInput.runUpdateSegments();
+          }
+          return segmentedInput.segments;
+        };
+      }
+
+      if (prop === 'refreshSegments') {
         return async () => {
           const segmentedInput = getSegmentedInputForTrack(target);
           await segmentedInput.runUpdateSegments();

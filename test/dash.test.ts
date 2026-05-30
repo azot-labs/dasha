@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { InputFormat } from 'mediabunny';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { DASH, DASH_FORMATS, Input, UrlSource, desc, isInput } from '../src';
 
 test('parse dash with the mediabunny-like input API', async () => {
@@ -38,4 +38,28 @@ test('parse dash with the mediabunny-like input API', async () => {
   expect(segments[0]?.initSegment?.location.path).toBe(initUrl);
   expect(segments[0]?.location.path).toBe(firstSegmentUrl);
   expect(segments[2]?.location.path).toBe(thirdSegmentUrl);
+});
+
+test('getSegments returns cached dash segments unless explicitly refreshed', async () => {
+  const manifestPath = path.resolve('test/fixtures/sample.mpd');
+  const manifestUrl = pathToFileURL(manifestPath).toString();
+
+  using input = new Input({
+    source: new UrlSource(manifestUrl),
+    formats: DASH_FORMATS,
+  });
+
+  const videoTracks = await input.getVideoTracks();
+  const track = videoTracks[0];
+  const initialSegments = await track.getSegments();
+  const segmentedInput = track.getSegmentedInput();
+  const runUpdateSegments = vi.spyOn(segmentedInput, 'runUpdateSegments');
+
+  const cachedSegments = await track.getSegments();
+  expect(cachedSegments).toBe(initialSegments);
+  expect(runUpdateSegments).not.toHaveBeenCalled();
+
+  const refreshedSegments = await track.refreshSegments();
+  expect(refreshedSegments).toBe(segmentedInput.segments);
+  expect(runUpdateSegments).toHaveBeenCalledTimes(1);
 });

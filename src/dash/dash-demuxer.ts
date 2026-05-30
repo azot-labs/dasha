@@ -1348,6 +1348,14 @@ abstract class DashTrackBackingBase {
 
   async getSegments(): Promise<DashSegment[]> {
     const segmentedInput = this.getSegmentedInput();
+    if (segmentedInput.segments.length === 0) {
+      await segmentedInput.runUpdateSegments();
+    }
+    return segmentedInput.segments;
+  }
+
+  async refreshSegments(): Promise<DashSegment[]> {
+    const segmentedInput = this.getSegmentedInput();
     await segmentedInput.runUpdateSegments();
     return segmentedInput.segments;
   }
