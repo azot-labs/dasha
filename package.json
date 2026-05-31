@@ -2,7 +2,7 @@
   "name": "dasha",
   "version": "4.3.1",
   "description": "Streaming manifest parser",
-  "packageManager": "pnpm@11.0.0",
+  "packageManager": "pnpm@11.5.0",
   "files": [
     "dist"
   ],
@@ -54,7 +54,7 @@
     }
   ],
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.19"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.10",
@@ -64,11 +64,11 @@
     "mediabunny": "^1.45.2"
   },
   "devDependencies": {
-    "@types/node": "^25.8.0",
-    "oxfmt": "^0.50.0",
-    "oxlint": "^1.65.0",
-    "tsdown": "^0.22.0",
+    "@types/node": "^25.9.1",
+    "oxfmt": "^0.52.0",
+    "oxlint": "^1.67.0",
+    "tsdown": "^0.22.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.7"
   }
 }
