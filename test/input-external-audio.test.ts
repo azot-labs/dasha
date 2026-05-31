@@ -48,3 +48,14 @@ test('addAudioTracks pairs imported audio with all video tracks by default', asy
     await expect(videoTrack.getPairableAudioTracks()).resolves.toContain(addedTracks[0]);
   }
 });
+
+test('addAudioTracks does not preserve source pairing masks', async () => {
+  using input = createAssetInput('audio-only-segment-base.mpd', DASH_FORMATS);
+
+  const addedTracks = await input.addAudioTracks(new UrlSource(assetFileUrl('bitmovin.mpd')), {
+    pairWith: false,
+  });
+
+  expect(addedTracks.length).toBeGreaterThan(0);
+  await expect(addedTracks[0]!.getPairableVideoTracks()).resolves.toEqual([]);
+});

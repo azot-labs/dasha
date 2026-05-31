@@ -501,7 +501,7 @@ class ImportedAudioTrackBacking {
   }
 
   getPairingMask() {
-    return this.#backing.getPairingMask?.() ?? 0n;
+    return 0n;
   }
 
   getBitrate() {
