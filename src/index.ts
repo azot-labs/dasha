@@ -8,6 +8,9 @@ import {
   type InputTrack,
   type InputVideoTrack,
   type InputAudioTrack,
+  type InputAudioSource,
+  type InputAudioTracksOptions,
+  type InputAudioTrackPairing,
   type InputSubtitleTrack,
   type InputSubtitleSource,
   type InputSubtitleTrackMetadata,
@@ -47,7 +50,13 @@ export {
 } from 'mediabunny';
 export { preserveSubtitleBackingsOnInput };
 export type { MediaCodec, VideoCodec, AudioCodec, SubtitleCodec, VideoDynamicRange } from './codec';
-export type { InputSubtitleSource, InputSubtitleTrackMetadata };
+export type {
+  InputAudioSource,
+  InputAudioTrackPairing,
+  InputAudioTracksOptions,
+  InputSubtitleSource,
+  InputSubtitleTrackMetadata,
+};
 export type {
   HlsSegment,
   HlsSegmentedInput,

@@ -1,11 +1,13 @@
 import {
   HLS,
+  ALL_FORMATS as ALL_MEDIABUNNY_FORMATS,
   Input as MediabunnyInput,
   InputTrack as MediabunnyInputTrack,
   InputVideoTrack as MediabunnyInputVideoTrackClass,
   SourceRef,
 } from 'mediabunny';
 import type {
+  InputFormat,
   InputAudioTrack as MediabunnyInputAudioTrack,
   EncodedPacket,
   MediaCodec,
@@ -17,6 +19,8 @@ import type {
 } from 'mediabunny';
 import type { HlsSegment, HlsSegmentedInput, InputTrackWithBacking } from './mediabunny';
 import type { DashSegment, DashSegmentedInput } from './dash/dash-segmented-input';
+import { DASH } from './dash/dash-demuxer';
+import { isLikelyDashPath } from './dash/dash-misc';
 import type { InputTrackQuery } from 'mediabunny';
 import {
   ExternalSubtitleTrackBacking,
@@ -74,6 +78,19 @@ export type InputSubtitleTrackMetadata = {
   name?: string | null;
   pairWith?: InputVideoTrack | Iterable<InputVideoTrack>;
 };
+export type InputAudioSource = Source | SourceRef<Source>;
+export type InputAudioTrackPairing =
+  | InputVideoTrack
+  | Iterable<InputVideoTrack>
+  | 'all'
+  | 'primary'
+  | false;
+export type InputAudioTracksOptions = {
+  filter?: InputTrackQuery<InputAudioTrack>['filter'];
+  formats?: readonly InputFormat[];
+  pairWith?: InputAudioTrackPairing;
+  sortBy?: InputTrackQuery<InputAudioTrack>['sortBy'];
+};
 
 type InternalInput<S extends Source = Source> = MediabunnyInput<S> & {
   _getTrackBackings(): Promise<NativeTrackBacking[]>;
@@ -112,6 +129,7 @@ type NativeTrackBacking = SegmentableBacking;
 type TrackBacking = NativeTrackBacking | SegmentableBacking;
 
 const CUSTOM_SUBTITLE_TRACK_ID_OFFSET = 1_000_000_000;
+const CUSTOM_AUDIO_TRACK_ID_OFFSET = 2_000_000_000;
 const CUSTOM_PAIRING_BIT_START = 1024n;
 const EXTRA_PAIRING_MASK = Symbol.for('dasha.extra-pairing-mask');
 const ORIGINAL_GET_PAIRING_MASK = Symbol.for('dasha.original-get-pairing-mask');
@@ -206,14 +224,20 @@ const getPairingMaskIndexes = (pairingMask: bigint) => {
 const applyHlsVideoRangeMetadata = async (demuxer: {
   hasMasterPlaylist?: boolean;
   input?: { _reader?: { requestEntireFile(): Promise<Uint8Array | { data: Uint8Array } | null> } };
-  internalTracks?: {
-    pairingMask: bigint;
-    info: { type: string };
-    videoRange?: string | null;
-  }[] | null;
+  internalTracks?:
+    | {
+        pairingMask: bigint;
+        info: { type: string };
+        videoRange?: string | null;
+      }[]
+    | null;
   [HLS_VIDEO_RANGE_APPLIED]?: boolean;
 }) => {
-  if (demuxer[HLS_VIDEO_RANGE_APPLIED] || !demuxer.hasMasterPlaylist || !demuxer.internalTracks?.length) {
+  if (
+    demuxer[HLS_VIDEO_RANGE_APPLIED] ||
+    !demuxer.hasMasterPlaylist ||
+    !demuxer.internalTracks?.length
+  ) {
     demuxer[HLS_VIDEO_RANGE_APPLIED] = true;
     return;
   }
@@ -292,15 +316,19 @@ const patchHlsDemuxer = (demuxer: unknown) => {
   return demuxer;
 };
 
-const getDynamicRangeForTrack = async (track: MediabunnyInputVideoTrack): Promise<VideoDynamicRange> => {
-  const backing = (track as MediabunnyInputVideoTrack & {
-    _backing?: {
-      internalTrack?: {
-        track?: { dynamicRange?: VideoDynamicRange };
-        videoRange?: string | null;
+const getDynamicRangeForTrack = async (
+  track: MediabunnyInputVideoTrack,
+): Promise<VideoDynamicRange> => {
+  const backing = (
+    track as MediabunnyInputVideoTrack & {
+      _backing?: {
+        internalTrack?: {
+          track?: { dynamicRange?: VideoDynamicRange };
+          videoRange?: string | null;
+        };
       };
-    };
-  })._backing;
+    }
+  )._backing;
   const manifestDynamicRange = backing?.internalTrack?.track?.dynamicRange;
   if (manifestDynamicRange) {
     return manifestDynamicRange;
@@ -373,6 +401,218 @@ const BACKING_TYPE_AUDIO = 'audio';
 const BACKING_TYPE_VIDEO = 'video';
 const BASE_INPUT_PATCHED = Symbol.for('dasha.base-mediabunny-input-patched');
 export const PRESERVE_SUBTITLE_BACKINGS = Symbol.for('dasha.preserve-subtitle-backings');
+
+const getDefaultAudioTrackFormats = (source: InputAudioSource): InputFormat[] => {
+  const rawSource = source instanceof SourceRef ? source.source : source;
+  return isLikelyDashPath(rawSource)
+    ? [DASH, ...ALL_MEDIABUNNY_FORMATS]
+    : [...ALL_MEDIABUNNY_FORMATS, DASH];
+};
+
+class WholeResourceAudioSegmentedInput {
+  segments: HlsSegment[] = [];
+  #source: Source;
+
+  constructor(source: Source) {
+    this.#source = source;
+  }
+
+  async runUpdateSegments() {
+    if (this.segments.length > 0) {
+      return;
+    }
+
+    const sourceWithRootPath = this.#source as Source & { rootPath?: string };
+    if (typeof sourceWithRootPath.rootPath !== 'string') {
+      return;
+    }
+
+    const segment: HlsSegment = {
+      timestamp: 0,
+      duration: 0,
+      relativeToUnixEpoch: false,
+      firstSegment: null,
+      sequenceNumber: 0,
+      location: {
+        path: sourceWithRootPath.rootPath,
+        offset: 0,
+        length: null,
+      },
+      encryption: null,
+      initSegment: null,
+      lastProgramDateTimeSeconds: null,
+    };
+    segment.firstSegment = segment;
+    this.segments = [segment];
+  }
+}
+
+class ImportedAudioTrackBacking {
+  #backing: SegmentableBacking;
+  #id: number;
+  #number: number;
+  #wholeResourceSegmentedInput: WholeResourceAudioSegmentedInput;
+
+  constructor(params: { backing: SegmentableBacking; id: number; number: number; source: Source }) {
+    this.#backing = params.backing;
+    this.#id = params.id;
+    this.#number = params.number;
+    this.#wholeResourceSegmentedInput = new WholeResourceAudioSegmentedInput(params.source);
+  }
+
+  getType() {
+    return BACKING_TYPE_AUDIO;
+  }
+
+  getId() {
+    return this.#id;
+  }
+
+  getNumber() {
+    return this.#number;
+  }
+
+  getCodec() {
+    return this.#backing.getCodec();
+  }
+
+  getInternalCodecId() {
+    return this.#backing.getInternalCodecId?.() ?? null;
+  }
+
+  getName() {
+    return this.#backing.getName?.() ?? null;
+  }
+
+  getLanguageCode() {
+    return this.#backing.getLanguageCode?.() ?? 'und';
+  }
+
+  getTimeResolution() {
+    return this.#backing.getTimeResolution?.() ?? 1000;
+  }
+
+  isRelativeToUnixEpoch() {
+    return this.#backing.isRelativeToUnixEpoch?.() ?? false;
+  }
+
+  getDisposition() {
+    return this.#backing.getDisposition?.() ?? {};
+  }
+
+  getPairingMask() {
+    return this.#backing.getPairingMask?.() ?? 0n;
+  }
+
+  getBitrate() {
+    return this.#backing.getBitrate?.() ?? null;
+  }
+
+  getAverageBitrate() {
+    return this.#backing.getAverageBitrate?.() ?? null;
+  }
+
+  getDurationFromMetadata(options: unknown) {
+    return this.#backing.getDurationFromMetadata?.(options) ?? Promise.resolve(null);
+  }
+
+  getLiveRefreshInterval() {
+    return this.#backing.getLiveRefreshInterval?.() ?? Promise.resolve(null);
+  }
+
+  getHasOnlyKeyPackets() {
+    return true;
+  }
+
+  getDecoderConfig() {
+    return this.#backing.getDecoderConfig?.() ?? Promise.resolve(null);
+  }
+
+  getMetadataCodecParameterString() {
+    return this.#backing.getMetadataCodecParameterString?.() ?? null;
+  }
+
+  getNumberOfChannels() {
+    return (
+      (
+        this.#backing as SegmentableBacking & { getNumberOfChannels?(): number | Promise<number> }
+      ).getNumberOfChannels?.() ?? 0
+    );
+  }
+
+  getSampleRate() {
+    return (
+      (
+        this.#backing as SegmentableBacking & { getSampleRate?(): number | Promise<number> }
+      ).getSampleRate?.() ?? 0
+    );
+  }
+
+  getFirstPacket(options: unknown) {
+    return (
+      (
+        this.#backing as SegmentableBacking & {
+          getFirstPacket?(options: unknown): Promise<EncodedPacket | null>;
+        }
+      ).getFirstPacket?.(options) ?? Promise.resolve(null)
+    );
+  }
+
+  getPacket(timestamp: number, options: unknown) {
+    return (
+      (
+        this.#backing as SegmentableBacking & {
+          getPacket?(timestamp: number, options: unknown): Promise<EncodedPacket | null>;
+        }
+      ).getPacket?.(timestamp, options) ?? Promise.resolve(null)
+    );
+  }
+
+  getNextPacket(packet: EncodedPacket, options: unknown) {
+    return (
+      (
+        this.#backing as SegmentableBacking & {
+          getNextPacket?(packet: EncodedPacket, options: unknown): Promise<EncodedPacket | null>;
+        }
+      ).getNextPacket?.(packet, options) ?? Promise.resolve(null)
+    );
+  }
+
+  getKeyPacket(timestamp: number, options: unknown) {
+    return (
+      (
+        this.#backing as SegmentableBacking & {
+          getKeyPacket?(timestamp: number, options: unknown): Promise<EncodedPacket | null>;
+        }
+      ).getKeyPacket?.(timestamp, options) ?? Promise.resolve(null)
+    );
+  }
+
+  getNextKeyPacket(packet: EncodedPacket, options: unknown) {
+    return (
+      (
+        this.#backing as SegmentableBacking & {
+          getNextKeyPacket?(packet: EncodedPacket, options: unknown): Promise<EncodedPacket | null>;
+        }
+      ).getNextKeyPacket?.(packet, options) ?? Promise.resolve(null)
+    );
+  }
+
+  getSegmentedInput() {
+    if (this.#backing.getSegmentedInput) {
+      return this.#backing.getSegmentedInput();
+    }
+
+    const hlsBacking = this.#backing as InputTrackWithBacking['_backing'];
+    if (hlsBacking.internalTrack?.demuxer?.getSegmentedInputForPath) {
+      return hlsBacking.internalTrack.demuxer.getSegmentedInputForPath(
+        hlsBacking.internalTrack.fullPath,
+      );
+    }
+
+    return this.#wholeResourceSegmentedInput;
+  }
+}
 
 const getBackingType = (backing: TrackBacking) => (backing as SegmentableBacking).getType?.();
 
@@ -449,7 +689,9 @@ const getSegmentedInputForTrack = (
 const getTrackBacking = (
   track: MediabunnyInputTrack,
 ): InputTrackWithBacking['_backing'] | SegmentableBacking =>
-  (track as InputTrackWithBacking)._backing as InputTrackWithBacking['_backing'] | SegmentableBacking;
+  (track as InputTrackWithBacking)._backing as
+    | InputTrackWithBacking['_backing']
+    | SegmentableBacking;
 
 const getTrackMetadataOverrides = (backing: OverridableTrackBacking) =>
   (backing[TRACK_METADATA_OVERRIDES] ??= {});
@@ -465,14 +707,16 @@ const ensureLanguageCodeOverridePatch = (backing: SegmentableBacking) => {
   Object.assign(backing, {
     getLanguageCode: () =>
       getTrackMetadataOverrides(patchedBacking).languageCode ??
-      (patchedBacking[ORIGINAL_GET_LANGUAGE_CODE]?.() ?? 'und'),
+      patchedBacking[ORIGINAL_GET_LANGUAGE_CODE]?.() ??
+      'und',
   });
   return patchedBacking;
 };
 
 const setTrackLanguageCode = (track: MediabunnyInputTrack, value: string) => {
-  getTrackMetadataOverrides(ensureLanguageCodeOverridePatch(getTrackBacking(track) as SegmentableBacking))
-    .languageCode = value;
+  getTrackMetadataOverrides(
+    ensureLanguageCodeOverridePatch(getTrackBacking(track) as SegmentableBacking),
+  ).languageCode = value;
 };
 
 const addSegmentAccess = <T extends MediabunnyInputTrack>(
@@ -567,8 +811,12 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
   #subtitleTrackCache = new WeakMap<object, MediabunnyInputSubtitleTrack>();
   #hlsSubtitleBackingsPromise: Promise<HlsSubtitleTrackBacking[]> | null = null;
   #customSubtitleBackings: ExternalSubtitleTrackBacking[] = [];
+  #customAudioBackings: ImportedAudioTrackBacking[] = [];
+  #audioInputs: MediabunnyInput[] = [];
   #nextCustomSubtitleTrackId = CUSTOM_SUBTITLE_TRACK_ID_OFFSET;
   #nextCustomSubtitleTrackNumber = CUSTOM_SUBTITLE_TRACK_ID_OFFSET;
+  #nextCustomAudioTrackId = CUSTOM_AUDIO_TRACK_ID_OFFSET;
+  #nextCustomAudioTrackNumber = CUSTOM_AUDIO_TRACK_ID_OFFSET;
   #nextPairingBitIndex: bigint | null = null;
 
   async #queryTracks<T extends MediabunnyInputTrack>(
@@ -596,13 +844,18 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
   async _getSyntheticTrackBackings(
     type?: typeof BACKING_TYPE_VIDEO | typeof BACKING_TYPE_AUDIO | typeof BACKING_TYPE_SUBTITLE,
   ) {
-    if (type && type !== BACKING_TYPE_SUBTITLE) {
+    if (type === BACKING_TYPE_VIDEO) {
       return [];
     }
 
-    const backings = [...this.#customSubtitleBackings];
+    const audioBackings = type !== BACKING_TYPE_SUBTITLE ? [...this.#customAudioBackings] : [];
+    const backings = type !== BACKING_TYPE_AUDIO ? [...this.#customSubtitleBackings] : [];
+    if (type === BACKING_TYPE_AUDIO) {
+      return audioBackings;
+    }
+
     if ((await this.getFormat()) !== HLS) {
-      return backings;
+      return [...audioBackings, ...backings];
     }
 
     if (!this.#hlsSubtitleBackingsPromise) {
@@ -615,7 +868,7 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
       this.#hlsSubtitleBackingsPromise = promise;
     }
 
-    return [...backings, ...(await this.#hlsSubtitleBackingsPromise)];
+    return [...audioBackings, ...backings, ...(await this.#hlsSubtitleBackingsPromise)];
   }
 
   #wrapSubtitleBacking(backing: SegmentableBacking) {
@@ -679,6 +932,38 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     return this._wrapBackingAsTrack(backing) as InputSubtitleTrack;
   }
 
+  async addAudioTracks(
+    source: InputAudioSource,
+    options: InputAudioTracksOptions = {},
+  ): Promise<InputAudioTrack[]> {
+    const audioInput = new SegmentedMediabunnyInput({
+      source,
+      formats: [...(options.formats ?? getDefaultAudioTrackFormats(source))],
+    });
+    this.#audioInputs.push(audioInput);
+
+    const audioTracks = await audioInput.getAudioTracks({
+      filter: options.filter,
+      sortBy: options.sortBy,
+    });
+    const pairWith = await this.#getAudioPairingVideoTracks(options.pairWith);
+    const importedTracks: InputAudioTrack[] = [];
+
+    for (const audioTrack of audioTracks) {
+      const backing = new ImportedAudioTrackBacking({
+        id: this.#nextCustomAudioTrackId++,
+        number: this.#nextCustomAudioTrackNumber++,
+        backing: getTrackBacking(audioTrack) as SegmentableBacking,
+        source: audioInput.source,
+      });
+      this.#pairAudioBacking(backing, pairWith);
+      this.#customAudioBackings.push(backing);
+      importedTracks.push(this._wrapBackingAsTrack(backing) as InputAudioTrack);
+    }
+
+    return importedTracks;
+  }
+
   #takeSubtitleSourceRef(source: InputSubtitleSource) {
     const rawSource = source instanceof SourceRef ? source.source : source;
     if (
@@ -712,6 +997,23 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     return tracks;
   }
 
+  async #getAudioPairingVideoTracks(pairWith: InputAudioTrackPairing | undefined) {
+    if (pairWith === false) {
+      return [];
+    }
+
+    if (!pairWith || pairWith === 'all') {
+      return this.getVideoTracks();
+    }
+
+    if (pairWith === 'primary') {
+      const primaryVideoTrack = await this.getPrimaryVideoTrack();
+      return primaryVideoTrack ? [primaryVideoTrack] : [];
+    }
+
+    return this.#toPairableVideoTracks(pairWith);
+  }
+
   #isIterable<T>(value: Iterable<T> | T): value is Iterable<T> {
     return typeof value === 'object' && value !== null && Symbol.iterator in value;
   }
@@ -720,9 +1022,17 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     subtitleBacking: ExternalSubtitleTrackBacking,
     videoTracks: InputVideoTrack[],
   ) {
+    this.#pairBackingWithVideoTracks(subtitleBacking as TrackBacking, videoTracks);
+  }
+
+  #pairAudioBacking(audioBacking: ImportedAudioTrackBacking, videoTracks: InputVideoTrack[]) {
+    this.#pairBackingWithVideoTracks(audioBacking as TrackBacking, videoTracks);
+  }
+
+  #pairBackingWithVideoTracks(backing: TrackBacking, videoTracks: InputVideoTrack[]) {
     for (const track of videoTracks) {
       const bit = this.#allocatePairingBit();
-      this.#appendPairingMask(subtitleBacking as TrackBacking, bit);
+      this.#appendPairingMask(backing, bit);
       this.#appendPairingMask(
         (track as unknown as MediabunnyInputTrack & { _backing: TrackBacking })._backing,
         bit,
@@ -743,7 +1053,11 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     const loadedBackings: TrackBacking[] = [...(internalInput._trackBackingsCache ?? [])];
     let maxBitIndex = -1n;
 
-    for (const backing of [...loadedBackings, ...this.#customSubtitleBackings]) {
+    for (const backing of [
+      ...loadedBackings,
+      ...this.#customSubtitleBackings,
+      ...this.#customAudioBackings,
+    ]) {
       const mask = backing.getPairingMask?.() ?? 0n;
       if (mask === 0n) {
         continue;
@@ -776,5 +1090,17 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
         (patchedBacking[ORIGINAL_GET_PAIRING_MASK]?.() ?? 0n) |
         (patchedBacking[EXTRA_PAIRING_MASK] ?? 0n),
     });
+  }
+
+  override dispose() {
+    if (this.disposed) {
+      return;
+    }
+
+    super.dispose();
+    for (const input of this.#audioInputs) {
+      input.dispose();
+    }
+    this.#audioInputs.length = 0;
   }
 }
