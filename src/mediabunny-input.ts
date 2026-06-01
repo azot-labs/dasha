@@ -134,6 +134,7 @@ type SegmentableBacking = {
   getDecoderConfig?(): Promise<VideoDecoderConfig | AudioDecoderConfig | null>;
   getMetadataCodecParameterString?(): string | null | Promise<string | null>;
   getSegmentedInput?(): HlsSegmentedInput | DashSegmentedInput;
+  segmentedInput?: HlsSegmentedInput;
   getSource?(): Source;
 };
 type NativeTrackBacking = SegmentableBacking;
@@ -620,6 +621,10 @@ class ImportedAudioTrackBacking {
       return this.#backing.getSegmentedInput();
     }
 
+    if (this.#backing.segmentedInput) {
+      return this.#backing.segmentedInput;
+    }
+
     const hlsBacking = this.#backing as InputTrackWithBacking['_backing'];
     if (hlsBacking.internalTrack?.demuxer?.getSegmentedInputForPath) {
       return hlsBacking.internalTrack.demuxer.getSegmentedInputForPath(
@@ -696,6 +701,10 @@ const getSegmentedInputForTrack = (
   const backing = getTrackBacking(track);
   if ('getSegmentedInput' in backing && typeof backing.getSegmentedInput === 'function') {
     return backing.getSegmentedInput();
+  }
+
+  if ('segmentedInput' in backing && backing.segmentedInput) {
+    return backing.segmentedInput;
   }
 
   const hlsBacking = backing as InputTrackWithBacking['_backing'];
