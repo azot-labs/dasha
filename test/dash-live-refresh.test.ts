@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { DASH_FORMATS, Input, UrlSource } from '../src';
 import { DashDemuxer } from '../src/dash/dash-demuxer';
 
@@ -69,4 +69,40 @@ test('do not match unrelated tracks when init segments are absent', () => {
   expect(currentAudioTrack).toBeDefined();
 
   expect(demuxer.findMatchingTrack(nextTracks, currentAudioTrack!)).toBeUndefined();
+});
+
+test('refresh DASH manifests through source fetchFn', async () => {
+  const manifests = [
+    createLiveManifest('period-a'),
+    createLiveManifest('period-a'),
+    createLiveManifest('period-b'),
+  ];
+  const fetchFn = vi.fn(async () => {
+    const manifest = manifests.shift();
+    if (!manifest) {
+      throw new Error('Unexpected manifest refresh');
+    }
+
+    return new Response(manifest, {
+      headers: {
+        'content-type': 'application/dash+xml',
+      },
+    });
+  });
+
+  using input = new Input({
+    source: new UrlSource('https://example.com/live', { fetchFn }),
+    formats: DASH_FORMATS,
+  });
+
+  const videoTracks = await input.getVideoTracks();
+  const segmentedInput = videoTracks[0]!.getSegmentedInput();
+  const track = segmentedInput.internalTrack.track;
+
+  expect(track.periodId).toBe('period-a');
+
+  await segmentedInput.demuxer.refreshTracks([track]);
+
+  expect(track.periodId).toBe('period-b');
+  expect(fetchFn).toHaveBeenCalledTimes(3);
 });

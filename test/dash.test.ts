@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { InputFormat } from 'mediabunny';
+import { BufferSource, CustomPathedSource, InputFormat } from 'mediabunny';
 import { expect, test, vi } from 'vitest';
 import { DASH, DASH_FORMATS, Input, UrlSource, desc, isInput } from '../src';
 
@@ -70,7 +70,9 @@ test('getSegments returns cached dash segments unless explicitly refreshed', asy
     formats: DASH_FORMATS,
   });
 
-  const videoTracks = await input.getVideoTracks();
+  const videoTracks = await input.getVideoTracks({
+    sortBy: async (track) => [desc(await track.getDisplayHeight())],
+  });
   const track = videoTracks[0];
   const initialSegments = await track.getSegments();
   const segmentedInput = track.getSegmentedInput();
@@ -83,4 +85,72 @@ test('getSegments returns cached dash segments unless explicitly refreshed', asy
   const refreshedSegments = await track.refreshSegments();
   expect(refreshedSegments).toBe(segmentedInput.segments);
   expect(runUpdateSegments).toHaveBeenCalledTimes(1);
+});
+
+test('exports DASH segment paths resolved through CustomPathedSource', async () => {
+  const manifestPath = path.resolve('test/fixtures/sample.mpd');
+  const manifestText = await readFile(manifestPath, 'utf8');
+  const manifestUrl = new URL('https://example.com/watch.mpd?fromCache=1');
+
+  using input = new Input({
+    source: new CustomPathedSource(manifestUrl.href, ({ path, isRoot }) => {
+      if (isRoot) {
+        return new UrlSource(path, {
+          fetchFn: async () =>
+            new Response(manifestText, {
+              headers: {
+                'content-type': 'application/dash+xml',
+              },
+            }),
+        });
+      }
+
+      const resolvedUrl = new URL(path, manifestUrl);
+      resolvedUrl.searchParams.set('fromCache', manifestUrl.searchParams.get('fromCache')!);
+      return new UrlSource(resolvedUrl.href);
+    }),
+    formats: DASH_FORMATS,
+  });
+
+  const videoTracks = await input.getVideoTracks({
+    sortBy: async (track) => [desc(await track.getDisplayHeight())],
+  });
+  const segments = await videoTracks[0]!.getSegments();
+
+  expect(segments[0]!.location.path).toBe(
+    'https://example.com/video/chunk-video-720p-1.m4s?fromCache=1',
+  );
+  expect(segments[0]!.location.sourcePath).toBe('https://example.com/video/chunk-video-720p-1.m4s');
+  expect(segments[0]!.initSegment!.location.path).toBe(
+    'https://example.com/video/init-video-720p.mp4?fromCache=1',
+  );
+});
+
+test('requires exported DASH segment paths to resolve to pathed sources', async () => {
+  const manifestPath = path.resolve('test/fixtures/sample.mpd');
+  const manifestText = await readFile(manifestPath, 'utf8');
+  const manifestUrl = 'https://example.com/watch.mpd';
+
+  using input = new Input({
+    source: new CustomPathedSource(manifestUrl, ({ path, isRoot }) => {
+      if (isRoot) {
+        return new UrlSource(path, {
+          fetchFn: async () =>
+            new Response(manifestText, {
+              headers: {
+                'content-type': 'application/dash+xml',
+              },
+            }),
+        });
+      }
+
+      return new BufferSource(new Uint8Array());
+    }),
+    formats: DASH_FORMATS,
+  });
+
+  const videoTracks = await input.getVideoTracks();
+  await expect(videoTracks[0]!.getSegments()).rejects.toThrow(
+    'DASH segment requests must resolve to a pathed source.',
+  );
 });

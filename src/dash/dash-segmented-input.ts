@@ -11,7 +11,12 @@ import {
   type SourceRequest,
 } from 'mediabunny';
 import { preserveSubtitleBackingsOnInput } from '../mediabunny-input';
-import { DASH_MIME_TYPE, type DashEncryptionData, type DashParsedSegment } from './dash-misc';
+import {
+  DASH_MIME_TYPE,
+  resolvePathedSourcePath,
+  type DashEncryptionData,
+  type DashParsedSegment,
+} from './dash-misc';
 import type { DashInternalTrack } from './dash-demuxer';
 
 export type Segment = {
@@ -22,6 +27,7 @@ export type Segment = {
 
 export type DashSegmentLocation = {
   path: string;
+  sourcePath: string;
   offset: number;
   length: number | null;
 };
@@ -111,25 +117,38 @@ const getLeastRecentlyUsedIndex = <T extends { age: number }>(entries: readonly 
   return bestIndex;
 };
 
-const getSegmentLocation = (segment: DashParsedSegment): DashSegmentLocation => ({
-  path: segment.url,
+const getSegmentLocation = async (
+  input: InternalMediabunnyInput,
+  segment: DashParsedSegment,
+): Promise<DashSegmentLocation> => ({
+  path: await resolvePathedSourcePath(input.source, {
+    path: segment.url,
+    isRoot: false,
+  }),
+  sourcePath: segment.url,
   offset: segment.startRange ?? 0,
   length: segment.expectLength ?? null,
 });
 
-const createInitSegment = (segment: DashParsedSegment): DashSegment => ({
+const createInitSegment = async (
+  input: InternalMediabunnyInput,
+  segment: DashParsedSegment,
+): Promise<DashSegment> => ({
   timestamp: 0,
   duration: 0,
   relativeToUnixEpoch: false,
   firstSegment: null,
   sequenceNumber: segment.sequenceNumber,
-  location: getSegmentLocation(segment),
+  location: await getSegmentLocation(input, segment),
   encryption: segment.encryption,
   initSegment: null,
   lastProgramDateTimeSeconds: null,
 });
 
-const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] => {
+const trackToDashSegments = async (
+  input: InternalMediabunnyInput,
+  internalTrack: DashInternalTrack,
+): Promise<DashSegment[]> => {
   const mediaSegments = internalTrack.track.mediaSegments;
   if (mediaSegments.length === 0) return [];
 
@@ -144,7 +163,7 @@ const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] =>
       relativeToUnixEpoch: false,
       firstSegment: null,
       sequenceNumber: mediaSegment.sequenceNumber,
-      location: getSegmentLocation(mediaSegment),
+      location: await getSegmentLocation(input, mediaSegment),
       encryption: mediaSegment.encryption,
       initSegment: null,
       lastProgramDateTimeSeconds: null,
@@ -155,7 +174,7 @@ const trackToDashSegments = (internalTrack: DashInternalTrack): DashSegment[] =>
 
   const firstSegment = segments[0] ?? null;
   const initSegment = internalTrack.track.initSegment
-    ? createInitSegment(internalTrack.track.initSegment)
+    ? await createInitSegment(input, internalTrack.track.initSegment)
     : null;
 
   for (const segment of segments) {
@@ -207,8 +226,9 @@ export class DashSegmentedInput {
   }
 
   async updateSegments() {
+    const input = this.demuxer.input as InternalMediabunnyInput;
     await this.demuxer.refreshTrackSegments(this.internalTrack);
-    this.segments = trackToDashSegments(this.internalTrack);
+    this.segments = await trackToDashSegments(input, this.internalTrack);
   }
 
   getRemainingWaitTimeMs() {
@@ -351,7 +371,7 @@ export class DashSegmentedInput {
 
     const segmentInput = preserveSubtitleBackingsOnInput(
       new MediabunnyInput({
-        source: new CustomPathedSource(segment.location.path, async (request) => {
+        source: new CustomPathedSource(segment.location.sourcePath, async (request) => {
           if (!request.isRoot) {
             throw new Error('Nested requests are not supported for DASH segments.');
           }

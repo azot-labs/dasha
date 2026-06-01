@@ -36,9 +36,12 @@ import {
   getDashTagAttrs,
   getInheritedDashChild,
   getSourceHeaders,
+  getSourcePath,
+  fetchDashManifest,
   isDashManifestText,
   isLikelyDashPath,
   loadDashManifest,
+  resolvePathedSourceRequest,
   parseDashRange,
   replaceDashVariables,
   type Element,
@@ -1184,15 +1187,14 @@ export class DashDemuxer {
       return;
     }
 
-    const response = await this.fetchManifest(this.manifestUrl).catch(() =>
-      this.fetchManifest(this.originalUrl),
+    const response = await this.fetchManifestText(this.manifestUrl).catch(() =>
+      this.fetchManifestText(this.originalUrl),
     );
-    const rawText = await response.text();
 
     this.manifestUrl = response.url;
     this.resetManifestUrls();
 
-    const nextTracks = this.extractTracks(rawText);
+    const nextTracks = this.extractTracks(response.text);
     for (const track of tracks) {
       const nextTrack = this.findMatchingTrack(nextTracks, track);
       if (!nextTrack) {
@@ -1209,14 +1211,26 @@ export class DashDemuxer {
     }
   }
 
-  async fetchManifest(url: string) {
-    const response = await fetch(url, { headers: this.headers });
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch DASH manifest: ${response.status} ${response.statusText} (${response.url})`,
-      );
+  async fetchManifestText(url: string) {
+    const manifestRef = await resolvePathedSourceRequest(this.input.source, {
+      path: url,
+      isRoot: true,
+    });
+    const manifestSource = manifestRef.source;
+    try {
+      const resolvedUrl = getSourcePath(manifestSource);
+      if (!resolvedUrl) {
+        throw new Error('DASH manifest requests must resolve to a pathed source.');
+      }
+
+      const response = await fetchDashManifest(manifestSource, resolvedUrl);
+      return {
+        text: await response.text(),
+        url: response.url || resolvedUrl,
+      };
+    } finally {
+      manifestRef.free();
     }
-    return response;
   }
 
   resetManifestUrls() {

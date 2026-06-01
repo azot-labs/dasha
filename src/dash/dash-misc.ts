@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { Source } from 'mediabunny';
+import type { Source, SourceRef, SourceRequest } from 'mediabunny';
 import { combineUrl } from '../util';
 import type { MediaCodec, VideoDynamicRange } from '../codec';
 import { tryParseVideoCodec } from '../video';
@@ -98,9 +98,37 @@ export const getDashTrackMatchKey = (track: DashParsedTrack) =>
     extension: track.extension,
   });
 
-const getSourcePath = (source: Source): string | undefined => {
+export const getSourcePath = (source: Source): string | undefined => {
   if ('rootPath' in source && typeof source.rootPath === 'string') {
     return source.rootPath;
+  }
+};
+
+export const resolvePathedSourceRequest = async (
+  source: Source,
+  request: SourceRequest,
+): Promise<SourceRef> => {
+  const pathedSource = source as Source & {
+    _resolveRequest?: (request: SourceRequest) => SourceRef | Promise<SourceRef>;
+  };
+  if (typeof pathedSource._resolveRequest !== 'function') {
+    throw new Error('DASH input currently requires a pathed source such as UrlSource.');
+  }
+
+  return await pathedSource._resolveRequest(request);
+};
+
+export const resolvePathedSourcePath = async (source: Source, request: SourceRequest) => {
+  const ref = await resolvePathedSourceRequest(source, request);
+  try {
+    const path = getSourcePath(ref.source);
+    if (!path) {
+      throw new Error('DASH segment requests must resolve to a pathed source.');
+    }
+
+    return path;
+  } finally {
+    ref.free();
   }
 };
 
@@ -138,6 +166,20 @@ const getSourceFetch = (source: Source): typeof fetch => {
   return options?.fetchFn ?? fetch;
 };
 
+export const fetchDashManifest = async (source: Source, url: string) => {
+  const response = await getSourceFetch(source)(url, {
+    headers: getSourceHeaders(source),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch DASH manifest: ${response.status} ${response.statusText} (${response.url})`,
+    );
+  }
+
+  return response;
+};
+
 const parseOriginalUrlFromManifest = (text: string) =>
   text.match(/<!--\s*URL:\s*([^\n]+?)\s*-->/)?.[1]?.trim();
 
@@ -147,37 +189,43 @@ export const loadDashManifest = async (source: Source) => {
     throw new Error('DASH input currently requires a pathed source such as UrlSource.');
   }
 
-  if (manifestPath.startsWith('http://') || manifestPath.startsWith('https://')) {
-    const response = await getSourceFetch(source)(manifestPath, {
-      headers: getSourceHeaders(source),
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch DASH manifest: ${response.status} ${response.statusText} (${response.url})`,
-      );
+  const manifestRef = await resolvePathedSourceRequest(source, {
+    path: manifestPath,
+    isRoot: true,
+  });
+  const manifestSource = manifestRef.source;
+  const resolvedManifestPath = getSourcePath(manifestSource);
+  try {
+    if (!resolvedManifestPath) {
+      throw new Error('DASH manifest requests must resolve to a pathed source.');
     }
 
-    return {
-      text: await response.text(),
-      url: response.url,
-    };
-  }
+    if (resolvedManifestPath.startsWith('http://') || resolvedManifestPath.startsWith('https://')) {
+      const response = await fetchDashManifest(manifestSource, resolvedManifestPath);
 
-  if (manifestPath.startsWith('file:')) {
-    const filePath = new URL(manifestPath);
-    const text = await readFile(filePath, 'utf8');
+      return {
+        text: await response.text(),
+        url: response.url || resolvedManifestPath,
+      };
+    }
+
+    if (resolvedManifestPath.startsWith('file:')) {
+      const filePath = new URL(resolvedManifestPath);
+      const text = await readFile(filePath, 'utf8');
+      return {
+        text,
+        url: parseOriginalUrlFromManifest(text) ?? resolvedManifestPath,
+      };
+    }
+
+    const text = await readFile(resolvedManifestPath, 'utf8');
     return {
       text,
-      url: parseOriginalUrlFromManifest(text) ?? manifestPath,
+      url: parseOriginalUrlFromManifest(text) ?? resolvedManifestPath,
     };
+  } finally {
+    manifestRef.free();
   }
-
-  const text = await readFile(manifestPath, 'utf8');
-  return {
-    text,
-    url: parseOriginalUrlFromManifest(text) ?? manifestPath,
-  };
 };
 
 export const isLikelyDashPath = (source: Source) => {
