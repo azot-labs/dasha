@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { InputFormat } from 'mediabunny';
@@ -38,6 +39,26 @@ test('parse dash with the mediabunny-like input API', async () => {
   expect(segments[0]?.initSegment?.location.path).toBe(initUrl);
   expect(segments[0]?.location.path).toBe(firstSegmentUrl);
   expect(segments[2]?.location.path).toBe(thirdSegmentUrl);
+});
+
+test('detects extensionless dash manifests through source fetchFn', async () => {
+  const manifestPath = path.resolve('test/fixtures/sample.mpd');
+  const manifestText = await readFile(manifestPath, 'utf8');
+  const fetchFn = vi.fn(async () => {
+    return new Response(manifestText, {
+      headers: {
+        'content-type': 'application/dash+xml',
+      },
+    });
+  });
+
+  using input = new Input({
+    source: new UrlSource('https://example.com/video?id=123', { fetchFn }),
+    formats: DASH_FORMATS,
+  });
+
+  expect(await input.getFormat()).toBe(DASH);
+  expect(fetchFn).toHaveBeenCalled();
 });
 
 test('getSegments returns cached dash segments unless explicitly refreshed', async () => {

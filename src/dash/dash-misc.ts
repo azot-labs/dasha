@@ -129,6 +129,15 @@ export const getSourceHeaders = (source: Source): Record<string, string> => {
   };
 };
 
+const getSourceFetch = (source: Source): typeof fetch => {
+  const options =
+    '_options' in source && source._options && typeof source._options === 'object'
+      ? (source._options as { fetchFn?: typeof fetch })
+      : undefined;
+
+  return options?.fetchFn ?? fetch;
+};
+
 const parseOriginalUrlFromManifest = (text: string) =>
   text.match(/<!--\s*URL:\s*([^\n]+?)\s*-->/)?.[1]?.trim();
 
@@ -139,7 +148,7 @@ export const loadDashManifest = async (source: Source) => {
   }
 
   if (manifestPath.startsWith('http://') || manifestPath.startsWith('https://')) {
-    const response = await fetch(manifestPath, {
+    const response = await getSourceFetch(source)(manifestPath, {
       headers: getSourceHeaders(source),
     });
 
