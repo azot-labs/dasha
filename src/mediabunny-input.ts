@@ -49,6 +49,10 @@ type TrackMetadataOverrideMethods = {
   setLanguageCode(value: string): void;
 };
 
+type TrackSourceMethods = {
+  readonly source: Source;
+};
+
 type VideoDynamicRangeMethods = {
   getDynamicRange(): Promise<VideoDynamicRange>;
 };
@@ -57,17 +61,23 @@ type MediabunnySubtitleTrackLike = MediabunnyInputTrack & {
   type: 'subtitle';
 };
 
-export type InputTrack = MediabunnyInputTrack & SegmentAccessMethods & TrackMetadataOverrideMethods;
+export type InputTrack = MediabunnyInputTrack &
+  SegmentAccessMethods &
+  TrackMetadataOverrideMethods &
+  TrackSourceMethods;
 export type InputVideoTrack = MediabunnyInputVideoTrack &
   SegmentAccessMethods &
   VideoDynamicRangeMethods &
-  TrackMetadataOverrideMethods;
+  TrackMetadataOverrideMethods &
+  TrackSourceMethods;
 export type InputAudioTrack = MediabunnyInputAudioTrack &
   SegmentAccessMethods &
-  TrackMetadataOverrideMethods;
+  TrackMetadataOverrideMethods &
+  TrackSourceMethods;
 export type InputSubtitleTrack = MediabunnySubtitleTrackLike &
   SegmentAccessMethods &
-  TrackMetadataOverrideMethods;
+  TrackMetadataOverrideMethods &
+  TrackSourceMethods;
 
 export type InputSubtitleSource = PathedSource | SourceRef<PathedSource>;
 export type InputSubtitleTrackMetadata = {
@@ -124,6 +134,7 @@ type SegmentableBacking = {
   getDecoderConfig?(): Promise<VideoDecoderConfig | AudioDecoderConfig | null>;
   getMetadataCodecParameterString?(): string | null | Promise<string | null>;
   getSegmentedInput?(): HlsSegmentedInput | DashSegmentedInput;
+  getSource?(): Source;
 };
 type NativeTrackBacking = SegmentableBacking;
 type TrackBacking = NativeTrackBacking | SegmentableBacking;
@@ -451,12 +462,14 @@ class ImportedAudioTrackBacking {
   #backing: SegmentableBacking;
   #id: number;
   #number: number;
+  #source: Source;
   #wholeResourceSegmentedInput: WholeResourceAudioSegmentedInput;
 
   constructor(params: { backing: SegmentableBacking; id: number; number: number; source: Source }) {
     this.#backing = params.backing;
     this.#id = params.id;
     this.#number = params.number;
+    this.#source = params.source;
     this.#wholeResourceSegmentedInput = new WholeResourceAudioSegmentedInput(params.source);
   }
 
@@ -502,6 +515,10 @@ class ImportedAudioTrackBacking {
 
   getPairingMask() {
     return 0n;
+  }
+
+  getSource() {
+    return this.#source;
   }
 
   getBitrate() {
@@ -693,6 +710,11 @@ const getTrackBacking = (
     | InputTrackWithBacking['_backing']
     | SegmentableBacking;
 
+const getTrackSource = (track: MediabunnyInputTrack) => {
+  const backing = getTrackBacking(track) as SegmentableBacking;
+  return backing.getSource?.() ?? track.input.source;
+};
+
 const getTrackMetadataOverrides = (backing: OverridableTrackBacking) =>
   (backing[TRACK_METADATA_OVERRIDES] ??= {});
 
@@ -721,9 +743,13 @@ const setTrackLanguageCode = (track: MediabunnyInputTrack, value: string) => {
 
 const addSegmentAccess = <T extends MediabunnyInputTrack>(
   track: T,
-): T & SegmentAccessMethods & TrackMetadataOverrideMethods =>
+): T & SegmentAccessMethods & TrackMetadataOverrideMethods & TrackSourceMethods =>
   new Proxy(track, {
     get(target, prop) {
+      if (prop === 'source') {
+        return getTrackSource(target);
+      }
+
       if (prop === 'getDynamicRange' && target instanceof MediabunnyInputVideoTrackClass) {
         return () => getDynamicRangeForTrack(target);
       }
@@ -757,7 +783,7 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(
       const value = Reflect.get(target, prop, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
-  }) as T & SegmentAccessMethods & TrackMetadataOverrideMethods;
+  }) as T & SegmentAccessMethods & TrackMetadataOverrideMethods & TrackSourceMethods;
 
 class MediabunnyInputSubtitleTrack extends MediabunnyInputTrack {
   #backing: SegmentableBacking;

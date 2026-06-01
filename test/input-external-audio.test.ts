@@ -6,11 +6,12 @@ test('addAudioTracks imports audio tracks from another readable source', async (
   using input = createAssetInput('bitmovin.mpd', DASH_FORMATS);
 
   const originalAudioTracks = await input.getAudioTracks();
-  const addedTracks = await input.addAudioTracks(
-    new UrlSource(assetFileUrl('audio-only-segment-base.mpd')),
-  );
+  const audioSource = new UrlSource(assetFileUrl('audio-only-segment-base.mpd'));
+  const addedTracks = await input.addAudioTracks(audioSource);
 
   expect(addedTracks).toHaveLength(2);
+  expect(addedTracks[0]?.input).toBe(input);
+  expect(addedTracks[0]?.source).toBe(audioSource);
   expect(await addedTracks[0]?.getLanguageCode()).toBe('en');
   expect(await addedTracks[1]?.getLanguageCode()).toBe('es');
   expect(await addedTracks[0]?.getCodec()).toBe('aac');
