@@ -5,23 +5,21 @@ import {
   InputTrack as MediabunnyInputTrack,
   InputVideoTrack as MediabunnyInputVideoTrackClass,
   SourceRef,
-} from 'mediabunny';
-import type {
-  InputFormat,
-  InputAudioTrack as MediabunnyInputAudioTrack,
-  EncodedPacket,
-  MediaCodec,
-  PacketType,
-  PathedSource,
-  TrackDisposition,
-  InputVideoTrack as MediabunnyInputVideoTrack,
-  Source,
+  type InputTrackQuery,
+  type InputFormat,
+  type InputAudioTrack as MediabunnyInputAudioTrack,
+  type EncodedPacket,
+  type MediaCodec,
+  type PacketType,
+  type PathedSource,
+  type TrackDisposition,
+  type InputVideoTrack as MediabunnyInputVideoTrack,
+  type Source,
 } from 'mediabunny';
 import type { HlsSegment, HlsSegmentedInput, InputTrackWithBacking } from './mediabunny';
 import type { DashSegment, DashSegmentedInput } from './dash/dash-segmented-input';
 import { DASH } from './dash/dash-demuxer';
-import { isLikelyDashPath } from './dash/dash-misc';
-import type { InputTrackQuery } from 'mediabunny';
+import { isLikelyDashPath, resolvePathedSourcePath } from './dash/dash-misc';
 import {
   ExternalSubtitleTrackBacking,
   getHlsSubtitleTrackBackings,
@@ -413,6 +411,7 @@ const BACKING_TYPE_AUDIO = 'audio';
 const BACKING_TYPE_VIDEO = 'video';
 const BASE_INPUT_PATCHED = Symbol.for('dasha.base-mediabunny-input-patched');
 export const PRESERVE_SUBTITLE_BACKINGS = Symbol.for('dasha.preserve-subtitle-backings');
+const resolvedHlsSegmentLocations = new WeakSet<object>();
 
 const getDefaultAudioTrackFormats = (source: InputAudioSource): InputFormat[] => {
   const rawSource = source instanceof SourceRef ? source.source : source;
@@ -712,6 +711,34 @@ const getSegmentedInputForTrack = (
   return internalTrack.demuxer.getSegmentedInputForPath(internalTrack.fullPath);
 };
 
+const isHlsSegment = (segment: HlsSegment | DashSegment): segment is HlsSegment =>
+  !('sourcePath' in segment.location);
+
+const resolveHlsSegmentLocation = async (source: Source, location: HlsSegment['location']) => {
+  if (resolvedHlsSegmentLocations.has(location)) {
+    return;
+  }
+
+  location.path = await resolvePathedSourcePath(source, {
+    path: location.path,
+    isRoot: false,
+  });
+  resolvedHlsSegmentLocations.add(location);
+};
+
+const resolveHlsSegments = async (source: Source, segments: (HlsSegment | DashSegment)[]) => {
+  for (const segment of segments) {
+    if (!isHlsSegment(segment)) {
+      continue;
+    }
+
+    if (segment.initSegment) {
+      await resolveHlsSegmentLocation(source, segment.initSegment.location);
+    }
+    await resolveHlsSegmentLocation(source, segment.location);
+  }
+};
+
 const getTrackBacking = (
   track: MediabunnyInputTrack,
 ): InputTrackWithBacking['_backing'] | SegmentableBacking =>
@@ -777,6 +804,7 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(
           if (segmentedInput.segments.length === 0) {
             await segmentedInput.runUpdateSegments();
           }
+          await resolveHlsSegments(getTrackSource(target), segmentedInput.segments);
           return segmentedInput.segments;
         };
       }
@@ -785,6 +813,7 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(
         return async () => {
           const segmentedInput = getSegmentedInputForTrack(target);
           await segmentedInput.runUpdateSegments();
+          await resolveHlsSegments(getTrackSource(target), segmentedInput.segments);
           return segmentedInput.segments;
         };
       }
