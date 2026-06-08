@@ -5,6 +5,8 @@ import type {
   EncodedPacket,
   Input as MediabunnyInput,
   TrackDisposition,
+  Source,
+  MaybePromise,
 } from 'mediabunny';
 import type { SubtitleCodec } from '../codec';
 import type { HlsSegment, HlsSegmentedInput } from '../mediabunny';
@@ -35,10 +37,23 @@ export const DEFAULT_TRACK_DISPOSITION: TrackDisposition = {
   visuallyImpaired: false,
 };
 
-export type SourceWithRootPath = {
+type ReadResult = {
+  bytes: Uint8Array;
+  view: DataView;
+  /** The offset of the bytes in the file. */
+  offset: number;
+};
+
+export type SourceWithRootPath = Source & {
   rootPath: string;
   _options?: { requestInit?: RequestInit };
   _url?: string | URL | Request;
+  _read(
+    start: number,
+    end: number,
+    minReadPosition: number,
+    maxReadPosition: number,
+  ): MaybePromise<ReadResult | null>;
 };
 
 type HlsSubtitleMediaTag = {
@@ -250,6 +265,20 @@ const loadPlaylistText = async (source: SourceWithRootPath, path: string) => {
       path,
       text: await readFile(new URL(path), 'utf8'),
     };
+  }
+
+  if (
+    path === source.rootPath &&
+    typeof source.getSize === 'function' &&
+    typeof source._read === 'function'
+  ) {
+    const size = await source.getSize();
+    const result = await source._read(0, size, 0, Infinity);
+    if (result) {
+      const data = result.bytes.subarray(result.offset, result.offset + size);
+      const text = new TextDecoder().decode(data);
+      return { path, text };
+    }
   }
 
   return {
