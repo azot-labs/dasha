@@ -325,6 +325,12 @@ const getRoleType = (roleValue: string) => {
   return ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
 };
 
+const getDashTrackName = (representation: Element, adaptationSet: Element) =>
+  representation.getAttribute('label') ||
+  representation.getAttribute('bitmovin:label') ||
+  adaptationSet.getAttribute('label') ||
+  adaptationSet.getAttribute('bitmovin:label');
+
 const createDashTrack = (params: {
   adaptationSet: Element;
   bitrate: number;
@@ -358,7 +364,7 @@ const createDashTrack = (params: {
     codecString: descriptor.codecString,
     peakBitrate: bitrate,
     averageBitrate: bitrate,
-    name: null,
+    name: getDashTrackName(representation, adaptationSet),
     default: false,
     groupId: representation.getAttribute('id'),
     periodId: period.getAttribute('id'),
@@ -889,28 +895,6 @@ const mergeDashPeriodTrack = (
   lastSegment.duration += incomingSegments.reduce((sum, segment) => sum + segment.duration, 0);
 };
 
-const linkDefaultDashGroups = (tracks: DashParsedTrack[]) => {
-  const audioList = tracks.filter((track) => track.type === 'audio');
-  const subtitleList = tracks.filter((track) => track.type === 'subtitle');
-  const videoList = tracks.filter((track) => track.type === 'video');
-
-  for (const video of videoList) {
-    const audioGroupId = audioList
-      .toSorted((a, b) => (b.peakBitrate || 0) - (a.peakBitrate || 0))
-      .at(0)?.groupId;
-    const subtitleGroupId = subtitleList
-      .toSorted((a, b) => (b.peakBitrate || 0) - (a.peakBitrate || 0))
-      .at(0)?.groupId;
-
-    if (audioGroupId) {
-      video.audioGroupId = audioGroupId;
-    }
-    if (subtitleGroupId) {
-      video.subtitleGroupId = subtitleGroupId;
-    }
-  }
-};
-
 export class DashDemuxer {
   input: MediabunnyInput;
   metadataPromise: Promise<void> | null = null;
@@ -998,7 +982,6 @@ export class DashDemuxer {
       this.appendPeriodTracks(tracks, manifest, period);
     }
 
-    linkDefaultDashGroups(tracks);
     return tracks;
   }
 

@@ -59,3 +59,29 @@ test('keep dash segment numbering and init segment association stable', async ()
   expect(segments[1]?.firstSegment).toBe(segments[0]);
   expect(segments[0]?.initSegment?.sequenceNumber).toBe(-1);
 });
+
+test('keeps separate DASH audio adaptation sets pairable with video', async () => {
+  using input = createAssetInput('multiple-audio-adaptation-sets.mpd', DASH_FORMATS);
+
+  const videoTrack = await input.getPrimaryVideoTrack();
+  const audioTracks = await input.getAudioTracks();
+
+  expect(videoTrack).not.toBeNull();
+  expect(audioTracks).toHaveLength(3);
+  expect(audioTracks.every((track) => track.canBePairedWith(videoTrack!))).toBe(true);
+
+  const audioEntries = await Promise.all(
+    audioTracks.map(async (track) => ({
+      language: await track.getLanguageCode(),
+      name: await track.getName(),
+    })),
+  );
+
+  expect(audioEntries).toEqual(
+    expect.arrayContaining([
+      { language: 'rus-x-anistar-dub', name: 'Russian (AniStar dub)' },
+      { language: 'jpn', name: 'Japanese' },
+      { language: 'rus-x-anilibr-vo', name: 'Russian (AniLibria voice-over)' },
+    ]),
+  );
+});

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-live:2011" type="static" mediaPresentationDuration="PT8S" minBufferTime="PT2S">
+  <BaseURL>https://example.com/media/</BaseURL>
+  <Period>
+    <AdaptationSet contentType="video" mimeType="video/mp4" segmentAlignment="true">
+      <Representation id="vid0" codecs="avc1.4D481E" width="640" height="360" bandwidth="594944">
+        <SegmentTemplate timescale="1000" media="video/fragment-$Number$.m4s" initialization="video/init.mp4" startNumber="1">
+          <SegmentTimeline>
+            <S t="0" d="4000" r="1" />
+          </SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet contentType="audio" mimeType="audio/mp4" segmentAlignment="true" lang="rus-x-anistar-dub" label="Russian (AniStar dub)">
+      <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2" />
+      <Representation id="aid0" codecs="mp4a.40.2" bandwidth="194779" audioSamplingRate="48000">
+        <SegmentTemplate timescale="1000" media="audio-anistar/fragment-$Number$.m4s" initialization="audio-anistar/init.mp4" startNumber="1">
+          <SegmentTimeline>
+            <S t="0" d="4000" r="1" />
+          </SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet contentType="audio" mimeType="audio/mp4" segmentAlignment="true" lang="rus-x-anilibr-vo" label="Russian (AniLibria voice-over)">
+      <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2" />
+      <Representation id="aid1" codecs="mp4a.40.2" bandwidth="193938" audioSamplingRate="48000">
+        <SegmentTemplate timescale="1000" media="audio-anilibria/fragment-$Number$.m4s" initialization="audio-anilibria/init.mp4" startNumber="1">
+          <SegmentTimeline>
+            <S t="0" d="4000" r="1" />
+          </SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet contentType="audio" mimeType="audio/mp4" segmentAlignment="true" lang="jpn" label="Japanese">
+      <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2" />
+      <Representation id="aid2" codecs="mp4a.40.2" bandwidth="194113" audioSamplingRate="48000">
+        <SegmentTemplate timescale="1000" media="audio-japanese/fragment-$Number$.m4s" initialization="audio-japanese/init.mp4" startNumber="1">
+          <SegmentTimeline>
+            <S t="0" d="4000" r="1" />
+          </SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
