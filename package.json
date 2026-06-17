@@ -61,14 +61,14 @@
     "temporal-polyfill": "^0.3.2"
   },
   "peerDependencies": {
-    "mediabunny": "^1.45.2"
+    "mediabunny": "^1.48.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
-    "oxfmt": "^0.52.0",
-    "oxlint": "^1.67.0",
-    "tsdown": "^0.22.1",
+    "@types/node": "^22.19.21",
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0",
+    "tsdown": "^0.22.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.9"
   }
 }
