@@ -48,7 +48,7 @@ export type SourceWithRootPath = Source & {
   rootPath: string;
   _options?: { requestInit?: RequestInit };
   _url?: string | URL | Request;
-  _read(
+  _read?(
     start: number,
     end: number,
     minReadPosition: number,
