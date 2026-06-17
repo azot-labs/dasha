@@ -61,35 +61,39 @@ test('addAudioTracks does not preserve source pairing masks', async () => {
   await expect(addedTracks[0]!.getPairableVideoTracks()).resolves.toEqual([]);
 });
 
-test('addAudioTracks imports segment access from direct hls media playlists', { timeout: 15_000 }, async () => {
-  using input = new Input({
-    source: new UrlSource(
-      'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/playlist_v-0576p-1400k-libx264.mp4.m3u8',
-    ),
-    formats: ALL_FORMATS,
-  });
+test(
+  'addAudioTracks imports segment access from direct hls media playlists',
+  { timeout: 15_000 },
+  async () => {
+    using input = new Input({
+      source: new UrlSource(
+        'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/playlist_v-0576p-1400k-libx264.mp4.m3u8',
+      ),
+      formats: ALL_FORMATS,
+    });
 
-  const addedTracks = await input.addAudioTracks(
-    new UrlSource(
-      'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/playlist_a-eng-0128k-aac-2c.mp4.m3u8',
-    ),
-  );
+    const addedTracks = await input.addAudioTracks(
+      new UrlSource(
+        'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/playlist_a-eng-0128k-aac-2c.mp4.m3u8',
+      ),
+    );
 
-  expect(addedTracks).toHaveLength(1);
+    expect(addedTracks).toHaveLength(1);
 
-  const videoTrack = await input.getPrimaryVideoTrack();
-  const videoSegments = await videoTrack!.getSegments();
-  const audioSegments = await addedTracks[0]!.getSegments();
+    const videoTrack = await input.getPrimaryVideoTrack();
+    const videoSegments = await videoTrack!.getSegments();
+    const audioSegments = await addedTracks[0]!.getSegments();
 
-  expect(videoSegments).toHaveLength(15);
-  expect(videoSegments[0]?.location.path).toBe(
-    'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/v-0576p-1400k-libx264-s1.mp4',
-  );
-  expect(audioSegments).toHaveLength(15);
-  expect(audioSegments[0]?.location.path).toBe(
-    'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/a-eng-0128k-aac-2c-s1.mp4',
-  );
-  expect(audioSegments[0]?.initSegment?.location.path).toBe(
-    'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/a-eng-0128k-aac-2c-init.mp4',
-  );
-});
+    expect(videoSegments).toHaveLength(15);
+    expect(videoSegments[0]?.location.path).toBe(
+      'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/v-0576p-1400k-libx264-s1.mp4',
+    );
+    expect(audioSegments).toHaveLength(15);
+    expect(audioSegments[0]?.location.path).toBe(
+      'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/a-eng-0128k-aac-2c-s1.mp4',
+    );
+    expect(audioSegments[0]?.initSegment?.location.path).toBe(
+      'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/a-eng-0128k-aac-2c-init.mp4',
+    );
+  },
+);
