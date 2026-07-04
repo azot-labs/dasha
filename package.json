@@ -1,42 +1,26 @@
 {
   "name": "dasha",
-  "version": "3.1.9",
+  "version": "3.2.0",
   "description": "Streaming manifest parser",
-  "files": [
-    "dasha.js",
-    "lib",
-    "types"
-  ],
-  "scripts": {
-    "test": "npm run lint && npm run types && node --test",
-    "types": "tsc -p tsconfig.json",
-    "lint": "eslint . && prettier --check .",
-    "fix": "eslint . --fix && prettier --write .",
-    "build": "tsup dasha.js --format esm,cjs",
-    "prepublishOnly": "npm run build"
-  },
-  "main": "dasha.js",
-  "types": "./types/dasha.d.ts",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/vitalygashkov/dasha"
-  },
   "keywords": [
-    "mpeg",
+    "adaptive",
     "dash",
     "hls",
-    "adaptive",
-    "mpd",
     "m3u8",
     "manifest",
+    "mpd",
+    "mpeg",
     "playlist"
   ],
-  "author": "Vitaly Gashkov <vitalygashkov@vk.com>",
-  "license": "MIT",
-  "readmeFilename": "README.md",
   "bugs": {
     "url": "https://github.com/vitalygashkov/dasha/issues",
     "email": "vitalygashkov@vk.com"
+  },
+  "license": "MIT",
+  "author": "Vitaly Gashkov <vitalygashkov@vk.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vitalygashkov/dasha"
   },
   "funding": [
     {
@@ -48,8 +32,20 @@
       "url": "https://www.patreon.com/vitalygashkov"
     }
   ],
-  "engines": {
-    "node": ">=22"
+  "files": [
+    "dasha.js",
+    "lib",
+    "types"
+  ],
+  "main": "dasha.js",
+  "types": "./types/dasha.d.ts",
+  "scripts": {
+    "test": "npm run lint && npm run types && node --test",
+    "types": "tsc -p tsconfig.json",
+    "lint": "eslint . && prettier --check .",
+    "fix": "eslint . --fix && prettier --write .",
+    "build": "tsup dasha.js --format esm,cjs",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "m3u8-parser": "^7.2.0"
@@ -64,5 +60,9 @@
     "prettier": "^3.4.2",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2"
-  }
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "readmeFilename": "README.md"
 }
