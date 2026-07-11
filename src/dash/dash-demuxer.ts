@@ -822,7 +822,7 @@ const applyContentProtection = (
   };
 
   for (const contentProtection of contentProtections) {
-    const schemeIdUri = contentProtection.getAttribute('schemeIdUri');
+    const schemeIdUri = contentProtection.getAttribute('schemeIdUri')?.toLowerCase();
     const defaultKID = contentProtection.getAttribute('cenc:default_KID') || undefined;
     const pssh =
       getDirectDashChild(contentProtection, 'cenc:pssh')?.textContent?.trim() || undefined;
