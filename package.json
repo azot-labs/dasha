@@ -61,7 +61,7 @@
     "temporal-polyfill": "^0.3.2"
   },
   "peerDependencies": {
-    "mediabunny": "^1.48.0"
+    "mediabunny": "^1.55.4"
   },
   "devDependencies": {
     "@types/node": "^22.19.21",
