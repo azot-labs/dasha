@@ -98,6 +98,10 @@ export type InputAudioTracksOptions = {
   formats?: readonly InputFormat[];
   pairWith?: InputAudioTrackPairing;
   sortBy?: InputTrackQuery<InputAudioTrack>['sortBy'];
+  /** Marks the imported tracks as audio description tracks. */
+  visuallyImpaired?: boolean;
+  /** Overrides the track name (e.g. "Audio Description" for tracks imported from a separate manifest). */
+  name?: string | null;
 };
 
 type InternalInput<S extends Source = Source> = MediabunnyInput<S> & {
@@ -463,13 +467,24 @@ class ImportedAudioTrackBacking {
   #id: number;
   #number: number;
   #source: Source;
+  #visuallyImpaired: boolean | undefined;
+  #name: string | null | undefined;
   #wholeResourceSegmentedInput: WholeResourceAudioSegmentedInput;
 
-  constructor(params: { backing: SegmentableBacking; id: number; number: number; source: Source }) {
+  constructor(params: {
+    backing: SegmentableBacking;
+    id: number;
+    number: number;
+    source: Source;
+    visuallyImpaired?: boolean;
+    name?: string | null;
+  }) {
     this.#backing = params.backing;
     this.#id = params.id;
     this.#number = params.number;
     this.#source = params.source;
+    this.#visuallyImpaired = params.visuallyImpaired;
+    this.#name = params.name;
     this.#wholeResourceSegmentedInput = new WholeResourceAudioSegmentedInput(params.source);
   }
 
@@ -494,7 +509,7 @@ class ImportedAudioTrackBacking {
   }
 
   getName() {
-    return this.#backing.getName?.() ?? null;
+    return this.#name ?? this.#backing.getName?.() ?? null;
   }
 
   getLanguageCode() {
@@ -510,7 +525,9 @@ class ImportedAudioTrackBacking {
   }
 
   getDisposition() {
-    return this.#backing.getDisposition?.() ?? {};
+    const disposition = (this.#backing.getDisposition?.() ?? {}) as Record<string, boolean>;
+    if (this.#visuallyImpaired === undefined) return disposition;
+    return { ...disposition, visuallyImpaired: this.#visuallyImpaired };
   }
 
   getPairingMask() {
@@ -1019,6 +1036,8 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
         number: this.#nextCustomAudioTrackNumber++,
         backing: getTrackBacking(audioTrack) as SegmentableBacking,
         source: audioInput.source,
+        visuallyImpaired: options.visuallyImpaired,
+        name: options.name,
       });
       this.#pairAudioBacking(backing, pairWith);
       this.#customAudioBackings.push(backing);

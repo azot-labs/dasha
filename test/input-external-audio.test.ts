@@ -61,6 +61,34 @@ test('addAudioTracks does not preserve source pairing masks', async () => {
   await expect(addedTracks[0]!.getPairableVideoTracks()).resolves.toEqual([]);
 });
 
+test('addAudioTracks marks imported audio tracks as visually impaired and overrides the name', async () => {
+  using input = createAssetInput('bitmovin.mpd', DASH_FORMATS);
+
+  const addedTracks = await input.addAudioTracks(
+    new UrlSource(assetFileUrl('audio-only-segment-base.mpd')),
+    {
+      visuallyImpaired: true,
+      name: 'Audio Description',
+    },
+  );
+
+  expect(await addedTracks[0]!.getName()).toBe('Audio Description');
+
+  const disposition = await addedTracks[0]!.getDisposition();
+  expect(disposition.visuallyImpaired).toBe(true);
+  expect(disposition.hearingImpaired).toBe(false);
+
+  const withoutOverrides = await input.addAudioTracks(
+    new UrlSource(assetFileUrl('audio-only-segment-base.mpd')),
+    {
+      filter: async (track) => (await track.getLanguageCode()) === 'es',
+    },
+  );
+
+  expect(await withoutOverrides[0]!.getName()).not.toBe('Audio Description');
+  expect((await withoutOverrides[0]!.getDisposition()).visuallyImpaired).toBe(false);
+});
+
 test(
   'addAudioTracks imports segment access from direct hls media playlists',
   { timeout: 15_000 },
