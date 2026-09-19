@@ -10,6 +10,7 @@ import type {
   MetadataTags,
   PacketRetrievalOptions,
   TrackDisposition,
+  TransformationMatrix,
   VideoCodec,
 } from 'mediabunny';
 import { checkIsDescriptive, getDolbyDigitalPlusComplexityIndex, parseChannels } from '../audio';
@@ -1398,8 +1399,8 @@ class DashInputVideoTrackBacking extends DashTrackBackingBase {
     return this.internalTrack.info.height;
   }
 
-  getRotation() {
-    return 0;
+  getTransformationMatrix(): TransformationMatrix {
+    return [1, 0, 0, 0, 1, 0, 0, 0, 1];
   }
 
   async getColorSpace(): Promise<VideoColorSpaceInit> {

@@ -79,6 +79,14 @@ type InternalMediabunnyInput = MediabunnyInput & {
 
 const roundToDivisor = (value: number, multiple: number) => Math.round(value * multiple) / multiple;
 
+// Thrown by mediabunny when encrypted samples are fetched without a `resolveKeyId` callback. Note that mediabunny
+// itself (including its HLS implementation) treats this as a hard error for any packet access; we deviate from that
+// only for key-frame lookups, treating it as "no packet found". This lets mediabunny's Conversion API copy-path
+// probe (which fetches sample data during `Conversion.init` since v1.56) complete on encrypted content, while the
+// error still surfaces when packets are actually consumed (sequential access, playback, or conversion execution).
+const isEncryptedSamplesError = (error: unknown) =>
+  error instanceof Error && error.message.startsWith('Encrypted media samples encountered');
+
 const binarySearchLessOrEqual = <T>(
   array: readonly T[],
   value: number,
@@ -544,7 +552,15 @@ export class DashSegmentedInput {
       return null;
     }
 
-    const packet = await track._backing.getFirstPacket(options);
+    let packet: EncodedPacket | null = null;
+    try {
+      packet = await track._backing.getFirstPacket(options);
+    } catch (error) {
+      if (!isEncryptedSamplesError(error)) {
+        throw error;
+      }
+    }
+
     if (!packet) {
       return null;
     }
@@ -632,9 +648,17 @@ export class DashSegmentedInput {
       const input = track.input as MediabunnyInput;
       const mediaOffset = await this.getMediaOffset(currentSegment, input, track);
       const offsetTimestamp = timestamp - mediaOffset;
-      const packet = keyframesOnly
-        ? await track._backing.getKeyPacket(offsetTimestamp, options)
-        : await track._backing.getPacket(offsetTimestamp, options);
+
+      let packet: EncodedPacket | null = null;
+      try {
+        packet = keyframesOnly
+          ? await track._backing.getKeyPacket(offsetTimestamp, options)
+          : await track._backing.getPacket(offsetTimestamp, options);
+      } catch (error) {
+        if (!keyframesOnly || !isEncryptedSamplesError(error)) {
+          throw error;
+        }
+      }
 
       if (!packet) {
         currentSegment = await this.getPreviousSegment(currentSegment);
