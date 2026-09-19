@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import type { Source, SourceRef, SourceRequest } from 'mediabunny';
+import { Temporal } from 'temporal-polyfill';
 import { combineUrl } from '../util';
 import type { MediaCodec, VideoDynamicRange } from '../codec';
 import { tryParseVideoCodec } from '../video';
@@ -377,3 +378,19 @@ export const parseDashRange = (range: string): [number, number] => {
   const [startRange, end] = range.split('-').map(Number);
   return [startRange, end - startRange + 1];
 };
+
+// ISO 8601 allows arbitrary fractional-second precision, but Temporal caps
+// it at nanoseconds. Manifests in the wild (e.g. Plex) emit 10+ fractional
+// digits, which makes Temporal.Duration.from throw. Round those down to
+// nanoseconds before parsing.
+const OVERPRECISE_SECONDS_PATTERN = /(\d+)\.(\d{10,})S/;
+
+export const normalizeDashDuration = (duration: string) =>
+  duration.replace(OVERPRECISE_SECONDS_PATTERN, (_, seconds: string, fraction: string) => {
+    const nanos = Math.round(Number(`0.${fraction}`) * 1e9);
+    if (nanos >= 1e9) return `${Number(seconds) + 1}.000000000S`;
+    return `${seconds}.${String(nanos).padStart(9, '0')}S`;
+  });
+
+export const parseDashDuration = (duration: string): Temporal.Duration =>
+  Temporal.Duration.from(normalizeDashDuration(duration));

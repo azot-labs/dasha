@@ -1,5 +1,4 @@
 import { DOMParser } from '@xmldom/xmldom';
-import { Temporal } from 'temporal-polyfill';
 import { ADTS, InputFormat, MATROSKA, MP3, MP4, QTFF, WEBM } from 'mediabunny';
 import type {
   AudioCodec,
@@ -43,6 +42,7 @@ import {
   isLikelyDashPath,
   loadDashManifest,
   resolvePathedSourceRequest,
+  parseDashDuration,
   parseDashRange,
   replaceDashVariables,
   type Element,
@@ -142,7 +142,7 @@ const processDashContent = (mpdContent: string) => {
 };
 
 const getDashRefreshIntervalMs = (timeShiftBufferDepth: string) =>
-  Temporal.Duration.from(timeShiftBufferDepth).total('milliseconds') / 2;
+  parseDashDuration(timeShiftBufferDepth).total('milliseconds') / 2;
 
 const getDisposition = (track: DashParsedTrack): TrackDisposition => ({
   ...DEFAULT_TRACK_DISPOSITION,
@@ -660,7 +660,7 @@ const applyFixedDurationTemplate = (params: {
     const offsetMs = Number(presentationTimeOffset) / 1000;
     availableTime.setUTCMilliseconds(availableTime.getUTCMilliseconds() + offsetMs);
     const elapsedSeconds = (now - availableTime.getTime()) / 1000;
-    const updateWindowSeconds = Temporal.Duration.from(timeShiftBufferDepth).total('seconds');
+    const updateWindowSeconds = parseDashDuration(timeShiftBufferDepth).total('seconds');
     startNumber += ((elapsedSeconds - updateWindowSeconds) * timescale) / duration;
     totalNumber = (updateWindowSeconds * timescale) / duration;
   }
@@ -1011,7 +1011,7 @@ export class DashDemuxer {
   }
 
   appendPeriodTracks(tracks: DashParsedTrack[], manifest: DashManifestInfo, period: Element): void {
-    const periodDurationSeconds = Temporal.Duration.from(
+    const periodDurationSeconds = parseDashDuration(
       period.getAttribute('duration') || manifest.mediaPresentationDuration || 'PT0S',
     ).total('seconds');
     const periodBaseUrl = extendDashBaseUrl(period, this.baseUrl);
