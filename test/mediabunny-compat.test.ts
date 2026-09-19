@@ -44,6 +44,9 @@ test('conversion track selection ignores DASH subtitles on plain mediabunny Inpu
   using input = new MediabunnyInput({
     source: new UrlSource(assetFileUrl('axinom-2.mpd')),
     formats: DASH_FORMATS,
+    // Conversion.init probes sample data since mediabunny 1.56, which requires a key resolver on
+    // encrypted content; a dummy key is enough for track selection validation without execution.
+    formatOptions: { isobmff: { resolveKeyId: () => '0'.repeat(32) } },
   });
 
   const selectedVideo = await input.getPrimaryVideoTrack();
