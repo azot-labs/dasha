@@ -155,6 +155,20 @@ async function getFrenchAudioTrack() {
 }
 ```
 
+### Removing audio and subtitle tracks
+
+Manifest tracks and tracks added through Dasha can be excluded from later queries. This is useful when a manifest advertises empty or otherwise unusable renditions.
+
+```ts
+const subtitleTracks = await input.getSubtitleTracks();
+
+for (const track of subtitleTracks) {
+  if ((await track.getSegments()).length === 0) {
+    input.removeSubtitleTrack(track);
+  }
+}
+```
+
 ### Mediabunny with DASH support
 
 > Only reading is supported
