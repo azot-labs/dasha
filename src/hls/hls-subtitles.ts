@@ -462,12 +462,6 @@ export class HlsSubtitlePlaylist implements HlsSegmentedInput {
       throw new Error('Invalid M3U8 file; expected first line to be #EXTM3U.');
     }
 
-    // Completed VOD playlists carry the whole presentation, so segment
-    // timestamps come straight from #EXTINF accumulation. The sliding-window
-    // backfill below assumes small media sequence counters and would explode
-    // on playlists that abuse the sequence as a unix timestamp.
-    const isCompletedVod = lines.some((line) => line.startsWith(TAG_ENDLIST));
-
     let accumulatedTime = 0;
     let nextDuration: number | null = null;
     let currentKey: HlsEncryptionInfo = null;
@@ -528,7 +522,6 @@ export class HlsSubtitlePlaylist implements HlsSegmentedInput {
       if (line.startsWith(TAG_EXTINF)) {
         if (!segmentSeen) {
           if (
-            !isCompletedVod &&
             lastProgramDateTimeSeconds === null &&
             nextSequenceNumber > 0 &&
             targetDuration !== null
