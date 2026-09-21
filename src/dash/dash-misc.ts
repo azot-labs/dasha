@@ -158,7 +158,7 @@ export const getSourceHeaders = (source: Source): Record<string, string> => {
   };
 };
 
-const getSourceFetch = (source: Source): typeof fetch => {
+export const getSourceFetch = (source: Source): typeof fetch => {
   const options =
     '_options' in source && source._options && typeof source._options === 'object'
       ? (source._options as { fetchFn?: typeof fetch })

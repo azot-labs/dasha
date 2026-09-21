@@ -8,6 +8,12 @@ import type {
   Source,
   MaybePromise,
 } from 'mediabunny';
+import {
+  getSourceFetch,
+  getSourceHeaders,
+  getSourcePath,
+  resolvePathedSourceRequest,
+} from '../dash/dash-misc';
 import type { SubtitleCodec } from '../codec';
 import type { HlsSegment, HlsSegmentedInput } from '../mediabunny';
 import { tryParseSubtitleCodec } from '../subtitle';
@@ -85,25 +91,32 @@ const splitPlaylistLines = (text: string) =>
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && (!line.startsWith('#') || line.startsWith('#EXT')));
 
-const normalizeHeaders = (headers: HeadersInit | undefined): Record<string, string> => {
-  if (!headers) return {};
-  if (headers instanceof Headers) {
-    return Object.fromEntries(headers.entries());
+// Custom pathed sources carry per-request headers and fetch implementations
+// inside their handler-resolved sources, so playlist requests must resolve
+// through the source instead of fetching with bare headers. Without this,
+// authenticated sources built on CustomPathedSource fail playlist reads.
+const fetchPlaylistResponse = async (
+  source: SourceWithRootPath,
+  url: string,
+): Promise<Response> => {
+  if (typeof (source as Source & { _resolveRequest?: unknown })._resolveRequest === 'function') {
+    const ref = await resolvePathedSourceRequest(source, {
+      path: url,
+      isRoot: url === source.rootPath,
+    });
+    try {
+      const resolvedSource = ref.source;
+      const resolvedUrl = getSourcePath(resolvedSource);
+      if (resolvedUrl) {
+        return await getSourceFetch(resolvedSource)(resolvedUrl, {
+          headers: getSourceHeaders(resolvedSource),
+        });
+      }
+    } finally {
+      ref.free();
+    }
   }
-  if (Array.isArray(headers)) {
-    return Object.fromEntries(headers);
-  }
-  return { ...headers };
-};
-
-const getSourceHeaders = (source: SourceWithRootPath) => {
-  const requestHeaders =
-    source._url instanceof Request ? normalizeHeaders(source._url.headers) : {};
-  const optionHeaders = normalizeHeaders(source._options?.requestInit?.headers);
-  return {
-    ...requestHeaders,
-    ...optionHeaders,
-  };
+  return await fetch(url, { headers: getSourceHeaders(source) });
 };
 
 const joinHlsPath = (basePath: string, relativePath: string) => {
@@ -246,9 +259,7 @@ class AttributeList {
 
 const loadPlaylistText = async (source: SourceWithRootPath, path: string) => {
   if (path.startsWith('http://') || path.startsWith('https://')) {
-    const response = await fetch(path, {
-      headers: getSourceHeaders(source),
-    });
+    const response = await fetchPlaylistResponse(source, path);
     if (!response.ok) {
       throw new Error(
         `Failed to fetch HLS playlist: ${response.status} ${response.statusText} (${response.url})`,
