@@ -893,6 +893,7 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
   #hlsSubtitleBackingsPromise: Promise<HlsSubtitleTrackBacking[]> | null = null;
   #customSubtitleBackings: ExternalSubtitleTrackBacking[] = [];
   #customAudioBackings: ImportedAudioTrackBacking[] = [];
+  #removedTrackBackings = new Set<TrackBacking>();
   #audioInputs: MediabunnyInput[] = [];
   #nextCustomSubtitleTrackId = CUSTOM_SUBTITLE_TRACK_ID_OFFSET;
   #nextCustomSubtitleTrackNumber = CUSTOM_SUBTITLE_TRACK_ID_OFFSET;
@@ -906,7 +907,11 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
   ) {
     const internalInput = this as unknown as InternalInput<S>;
     const backings = await getTrackBackingsByType(internalInput, type);
-    return queryWrappedTracks(internalInput, backings, query);
+    return queryWrappedTracks(
+      internalInput,
+      backings.filter((backing) => !this.#removedTrackBackings.has(backing)),
+      query,
+    );
   }
 
   override _wrapBackingAsTrack(backing: TrackBacking): InputTrack {
@@ -1045,6 +1050,30 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     }
 
     return importedTracks;
+  }
+
+  /** Removes an audio track from this input's track queries. */
+  removeAudioTrack(track: InputAudioTrack): void {
+    this.#removeTrack(track, BACKING_TYPE_AUDIO);
+  }
+
+  /** Removes a subtitle track from this input's track queries. */
+  removeSubtitleTrack(track: InputSubtitleTrack): void {
+    this.#removeTrack(track, BACKING_TYPE_SUBTITLE);
+  }
+
+  #removeTrack(
+    track: MediabunnyInputTrack,
+    expectedType: typeof BACKING_TYPE_AUDIO | typeof BACKING_TYPE_SUBTITLE,
+  ) {
+    if (track.input !== this) {
+      throw new TypeError('track must belong to the same input instance.');
+    }
+    if (track.type !== expectedType) {
+      throw new TypeError(`track must be an ${expectedType} track.`);
+    }
+
+    this.#removedTrackBackings.add(getTrackBacking(track) as TrackBacking);
   }
 
   #takeSubtitleSourceRef(source: InputSubtitleSource) {
