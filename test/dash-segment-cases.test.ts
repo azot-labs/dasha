@@ -79,6 +79,50 @@ test('truncate SegmentList entries when the timeline ends first', async () => {
   expect(segments[1]?.location.path).toBe('https://www.example.com/low/segment-2.ts');
 });
 
+test('resolve SegmentList byte ranges against BaseURL when media is omitted or empty', async () => {
+  using input = createAssetInput('segment-list-media-ranges.mpd', DASH_FORMATS);
+  const audio = await input.getPrimaryAudioTrack();
+  if (!audio) throw new Error('Missing DASH audio track.');
+
+  const segments = await audio.getSegments();
+  expect(
+    segments.map((segment) => ({
+      path: segment.location.path,
+      offset: segment.location.offset,
+      length: segment.location.length,
+      duration: segment.duration,
+      sequenceNumber: segment.sequenceNumber,
+    })),
+  ).toEqual([
+    {
+      path: 'https://example.com/audio.mp4',
+      offset: 660,
+      length: 65499,
+      duration: 4,
+      sequenceNumber: 0,
+    },
+    {
+      path: 'https://example.com/audio.mp4',
+      offset: 66159,
+      length: 65499,
+      duration: 4,
+      sequenceNumber: 1,
+    },
+    {
+      path: 'https://example.com/audio.mp4',
+      offset: 131658,
+      length: 65499,
+      duration: 4,
+      sequenceNumber: 2,
+    },
+  ]);
+  expect(segments[0]?.initSegment?.location).toMatchObject({
+    path: 'https://example.com/audio.mp4',
+    offset: 32,
+    length: 628,
+  });
+});
+
 test('apply SegmentList timescale to fixed-duration segments', async () => {
   using input = createAssetInput('segment-list-timescale.mpd', DASH_FORMATS);
 

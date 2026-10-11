@@ -523,8 +523,7 @@ const applySegmentList = (params: {
   const fixedDuration = fixedDurationAttr ? Number(fixedDurationAttr) : Number.NaN;
 
   for (const [segmentIndex, segmentUrl] of segmentUrls.entries()) {
-    const media = segmentUrl.getAttribute('media');
-    if (!media) continue;
+    const media = segmentUrl.getAttribute('media') || '';
 
     const duration = timelineEntries?.[segmentIndex]?.duration ?? fixedDuration / timescale;
     if (!Number.isFinite(duration)) {
