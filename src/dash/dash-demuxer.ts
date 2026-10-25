@@ -38,6 +38,7 @@ import {
   getSourceHeaders,
   getSourcePath,
   parseDashPsshBox,
+  createClearKeyPsshBox,
   fetchDashManifest,
   isDashManifestText,
   isLikelyDashPath,
@@ -61,6 +62,8 @@ const DASH_NAMESPACE_MAP = new Map([
 
 const WIDEVINE_SYSTEM_ID = 'edef8ba9-79d6-4ace-a3c8-27dcd51d21ed';
 const PLAYREADY_SYSTEM_ID = '9a04f079-9840-4286-ab92-e65be0885f95';
+const CLEARKEY_SCHEME_ID = 'e2719d58-a985-b3c9-781a-b030af78d30e';
+const CLEARKEY_SYSTEM_ID = '1077efec-c0b2-4d02-ace3-3c1e52e2fb4b';
 
 type DashManifestInfo = {
   mpdElement: Element;
@@ -827,10 +830,17 @@ const applyContentProtection = (
     psshBoxes: [],
     drm: {},
   };
+  const defaultKeyIds = new Set<string>();
+  let clearKeyDeclared = false;
 
   for (const contentProtection of contentProtections) {
     const schemeIdUri = contentProtection.getAttribute('schemeIdUri')?.toLowerCase();
     const defaultKID = contentProtection.getAttribute('cenc:default_KID') || undefined;
+    if (defaultKID) {
+      for (const keyId of defaultKID.trim().split(/\s+/)) {
+        if (keyId) defaultKeyIds.add(keyId);
+      }
+    }
     const psshElements = getDirectDashChildren(contentProtection, 'cenc:pssh');
     const pssh = psshElements[0]?.textContent?.trim() || undefined;
     const drmData = { keyId: defaultKID, pssh };
@@ -845,6 +855,24 @@ const applyContentProtection = (
       encryption.drm.widevine = drmData;
     } else if (schemeIdUri?.includes(PLAYREADY_SYSTEM_ID)) {
       encryption.drm.playready = drmData;
+    } else if (
+      schemeIdUri?.includes(CLEARKEY_SCHEME_ID) ||
+      schemeIdUri?.includes(CLEARKEY_SYSTEM_ID)
+    ) {
+      encryption.drm.clearkey = drmData;
+      clearKeyDeclared = true;
+    }
+  }
+
+  if (clearKeyDeclared) {
+    const keyIds = [...defaultKeyIds];
+    encryption.drm.clearkey = { keyId: keyIds[0] };
+    const hasClearKeyPssh = encryption.psshBoxes.some(
+      (box) => box.systemId.toLowerCase() === CLEARKEY_SYSTEM_ID.replaceAll('-', ''),
+    );
+    if (!hasClearKeyPssh) {
+      const clearKeyPssh = createClearKeyPsshBox(keyIds);
+      if (clearKeyPssh) encryption.psshBoxes.push(clearKeyPssh);
     }
   }
 
