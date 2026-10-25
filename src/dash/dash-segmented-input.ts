@@ -118,10 +118,26 @@ const getLeastRecentlyUsedIndex = <T extends { age: number }>(entries: readonly 
   return bestIndex;
 };
 
-const psshBoxesAreEqual = (left: PsshBox, right: PsshBox) =>
-  left.systemId === right.systemId &&
-  left.data.length === right.data.length &&
-  left.data.every((byte, index) => byte === right.data[index]);
+const psshBoxesAreEqual = (left: PsshBox, right: PsshBox) => {
+  if (left.systemId !== right.systemId) return false;
+  if (left.keyIds === null || right.keyIds === null) {
+    if (left.keyIds !== right.keyIds) return false;
+  } else {
+    const leftKeyIds = left.keyIds;
+    const rightKeyIds = right.keyIds;
+    if (
+      leftKeyIds.length !== rightKeyIds.length ||
+      leftKeyIds.some((keyId, index) => keyId !== rightKeyIds[index])
+    ) {
+      return false;
+    }
+  }
+
+  return (
+    left.data.length === right.data.length &&
+    left.data.every((byte, index) => byte === right.data[index])
+  );
+};
 
 const getSegmentLocation = async (
   input: InternalMediabunnyInput,
