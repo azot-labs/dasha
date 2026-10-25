@@ -37,6 +37,7 @@ import {
   getInheritedDashChild,
   getSourceHeaders,
   getSourcePath,
+  parseDashPsshBox,
   fetchDashManifest,
   isDashManifestText,
   isLikelyDashPath,
@@ -800,6 +801,11 @@ const cloneEncryption = (encryption: DashEncryptionData | null): DashEncryptionD
         method: encryption.method,
         key: encryption.key,
         iv: encryption.iv,
+        psshBoxes: encryption.psshBoxes.map((psshBox) => ({
+          ...psshBox,
+          keyIds: psshBox.keyIds ? [...psshBox.keyIds] : null,
+          data: psshBox.data.slice(),
+        })),
         drm: { ...encryption.drm },
       }
     : null;
@@ -818,15 +824,22 @@ const applyContentProtection = (
 
   const encryption: DashEncryptionData = {
     method: ENCRYPT_METHODS.CENC,
+    psshBoxes: [],
     drm: {},
   };
 
   for (const contentProtection of contentProtections) {
     const schemeIdUri = contentProtection.getAttribute('schemeIdUri')?.toLowerCase();
     const defaultKID = contentProtection.getAttribute('cenc:default_KID') || undefined;
-    const pssh =
-      getDirectDashChild(contentProtection, 'cenc:pssh')?.textContent?.trim() || undefined;
+    const psshElements = getDirectDashChildren(contentProtection, 'cenc:pssh');
+    const pssh = psshElements[0]?.textContent?.trim() || undefined;
     const drmData = { keyId: defaultKID, pssh };
+    for (const psshElement of psshElements) {
+      const psshBox = parseDashPsshBox(psshElement.textContent?.trim() ?? '');
+      if (psshBox) {
+        encryption.psshBoxes.push(psshBox);
+      }
+    }
 
     if (schemeIdUri?.includes(WIDEVINE_SYSTEM_ID)) {
       encryption.drm.widevine = drmData;
