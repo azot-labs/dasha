@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { Source, SourceRef, SourceRequest } from 'mediabunny';
+import type { PsshBox, Source, SourceRef, SourceRequest } from 'mediabunny';
 import { Temporal } from 'temporal-polyfill';
 import { combineUrl } from '../util';
 import type { MediaCodec, VideoDynamicRange } from '../codec';
@@ -22,10 +22,82 @@ export type DashEncryptionData = {
   method: string;
   key?: Uint8Array;
   iv?: Uint8Array;
+  psshBoxes: PsshBox[];
   drm: {
     widevine?: { keyId?: string; pssh?: string };
     playready?: { keyId?: string; pssh?: string };
     fairplay?: { keyId?: string; pssh?: string };
+  };
+};
+
+export const parseDashPsshBox = (base64: string): PsshBox | undefined => {
+  const normalizedBase64 = base64.replace(/\s/g, '');
+  if (
+    !normalizedBase64 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(normalizedBase64) ||
+    normalizedBase64.length % 4 === 1
+  ) {
+    return undefined;
+  }
+
+  let bytes: Uint8Array;
+  try {
+    const decoded = atob(normalizedBase64);
+    bytes = Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  } catch {
+    return undefined;
+  }
+
+  if (
+    bytes.length < 32 ||
+    bytes[4] !== 0x70 ||
+    bytes[5] !== 0x73 ||
+    bytes[6] !== 0x73 ||
+    bytes[7] !== 0x68
+  ) {
+    return undefined;
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const boxSize = view.getUint32(0);
+  if (boxSize !== bytes.length) return undefined;
+
+  const contents = bytes.subarray(8);
+  const version = contents[0] ?? 0;
+  if (version > 1) return undefined;
+
+  let position = 4;
+  const systemIdBytes = contents.subarray(position, position + 16);
+  position += 16;
+  const systemId = Array.from(systemIdBytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+  let keyIds: string[] | null = null;
+  if (version > 0) {
+    if (position + 4 > contents.length) return undefined;
+    const keyIdCount = new DataView(contents.buffer, contents.byteOffset + position, 4).getUint32(
+      0,
+    );
+    position += 4;
+    if (keyIdCount > Math.floor((contents.length - position - 4) / 16)) return undefined;
+    if (keyIdCount > 0) {
+      keyIds = [];
+      for (let index = 0; index < keyIdCount; index++) {
+        const keyId = contents.subarray(position, position + 16);
+        keyIds.push(Array.from(keyId, (byte) => byte.toString(16).padStart(2, '0')).join(''));
+        position += 16;
+      }
+    }
+  }
+
+  if (position + 4 > contents.length) return undefined;
+  const dataSize = new DataView(contents.buffer, contents.byteOffset + position, 4).getUint32(0);
+  position += 4;
+  if (position + dataSize !== contents.length) return undefined;
+
+  return {
+    systemId,
+    keyIds,
+    data: contents.slice(position),
   };
 };
 

@@ -14,4 +14,12 @@ test('parse bitmovin mpd with drm through the Input API', async () => {
   expect(firstSegment?.encryption?.drm.widevine?.pssh).toBe(
     'AAAAW3Bzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAADsIARIQ62dqu8s0Xpa7z2FmMPGj2hoNd2lkZXZpbmVfdGVzdCIQZmtqM2xqYVNkZmFsa3IzaioCSEQyAA==',
   );
+  expect(firstSegment?.encryption?.psshBoxes).toEqual([
+    expect.objectContaining({
+      systemId: 'edef8ba979d64acea3c827dcd51d21ed',
+      keyIds: null,
+      data: expect.any(Uint8Array),
+    }),
+  ]);
+  expect(firstSegment?.encryption?.psshBoxes[0]?.data).toHaveLength(59);
 });

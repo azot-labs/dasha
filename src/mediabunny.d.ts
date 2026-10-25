@@ -1,3 +1,5 @@
+import type { PsshBox } from 'mediabunny';
+
 export type Segment = {
   timestamp: number;
   duration: number;
@@ -20,6 +22,7 @@ export type HlsEncryptionInfo =
     }
   | {
       method: 'SAMPLE-AES' | 'SAMPLE-AES-CTR';
+      psshBox: PsshBox | null;
     };
 
 export type HlsSegment = Segment & {

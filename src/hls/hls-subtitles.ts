@@ -588,6 +588,7 @@ export class HlsSubtitlePlaylist implements HlsSegmentedInput {
         if (method === 'SAMPLE-AES' || method === 'SAMPLE-AES-CTR') {
           currentKey = {
             method,
+            psshBox: null,
           };
           continue;
         }

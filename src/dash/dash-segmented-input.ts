@@ -3,6 +3,7 @@ import {
   CustomPathedSource,
   EncodedPacket,
   Input as MediabunnyInput,
+  type PsshBox,
   type InputFormat,
   type InputFormatOptions,
   type InputTrack,
@@ -115,6 +116,27 @@ const getLeastRecentlyUsedIndex = <T extends { age: number }>(entries: readonly 
   }
 
   return bestIndex;
+};
+
+const psshBoxesAreEqual = (left: PsshBox, right: PsshBox) => {
+  if (left.systemId !== right.systemId) return false;
+  if (left.keyIds === null || right.keyIds === null) {
+    if (left.keyIds !== right.keyIds) return false;
+  } else {
+    const leftKeyIds = left.keyIds;
+    const rightKeyIds = right.keyIds;
+    if (
+      leftKeyIds.length !== rightKeyIds.length ||
+      leftKeyIds.some((keyId, index) => keyId !== rightKeyIds[index])
+    ) {
+      return false;
+    }
+  }
+
+  return (
+    left.data.length === right.data.length &&
+    left.data.every((byte, index) => byte === right.data[index])
+  );
 };
 
 const getSegmentLocation = async (
@@ -368,6 +390,26 @@ export class DashSegmentedInput {
     const formatOptions: InputFormatOptions = {
       ...input._formatOptions,
     };
+    const manifestPsshBoxes = segment.encryption?.psshBoxes ?? [];
+    const resolveKeyId = input._formatOptions.isobmff?.resolveKeyId;
+    if (manifestPsshBoxes.length > 0 && resolveKeyId) {
+      formatOptions.isobmff = {
+        ...input._formatOptions.isobmff,
+        resolveKeyId: (options) => {
+          let psshBoxes = options.psshBoxes;
+          for (const psshBox of manifestPsshBoxes) {
+            if (
+              (psshBox.keyIds === null || psshBox.keyIds.includes(options.keyId)) &&
+              !psshBoxes.some((box) => psshBoxesAreEqual(box, psshBox))
+            ) {
+              psshBoxes = [...psshBoxes, psshBox];
+            }
+          }
+
+          return resolveKeyId({ ...options, psshBoxes });
+        },
+      };
+    }
 
     const segmentInput = preserveSubtitleBackingsOnInput(
       new MediabunnyInput({

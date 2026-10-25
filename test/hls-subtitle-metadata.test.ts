@@ -169,5 +169,6 @@ test('preserve HLS subtitle encryption metadata on returned segments', async () 
   });
   expect(segments[1]?.encryption).toEqual({
     method: 'SAMPLE-AES-CTR',
+    psshBox: null,
   });
 });

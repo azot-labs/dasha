@@ -37,4 +37,5 @@ test('parse content protection when cenc namespaces are omitted', async () => {
     '11111111-2222-3333-4444-555555555555',
   );
   expect(firstSegment?.encryption?.drm.widevine?.pssh).toBe('missing-namespace-pssh');
+  expect(firstSegment?.encryption?.psshBoxes).toEqual([]);
 });
