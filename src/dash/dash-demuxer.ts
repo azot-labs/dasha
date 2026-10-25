@@ -838,7 +838,8 @@ const applyContentProtection = (
     const defaultKID = contentProtection.getAttribute('cenc:default_KID') || undefined;
     if (defaultKID) {
       for (const keyId of defaultKID.trim().split(/\s+/)) {
-        if (keyId) defaultKeyIds.add(keyId);
+        const normalizedKeyId = keyId.replaceAll('-', '').toLowerCase();
+        if (/^[0-9a-f]{32}$/.test(normalizedKeyId)) defaultKeyIds.add(keyId);
       }
     }
     const psshElements = getDirectDashChildren(contentProtection, 'cenc:pssh');
@@ -866,7 +867,10 @@ const applyContentProtection = (
 
   if (clearKeyDeclared) {
     const keyIds = [...defaultKeyIds];
-    encryption.drm.clearkey = { keyId: keyIds[0] };
+    encryption.drm.clearkey = {
+      ...encryption.drm.clearkey,
+      keyId: keyIds[0],
+    };
     const hasClearKeyPssh = encryption.psshBoxes.some(
       (box) => box.systemId.toLowerCase() === CLEARKEY_SYSTEM_ID.replaceAll('-', ''),
     );
