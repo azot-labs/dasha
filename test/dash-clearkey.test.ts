@@ -27,7 +27,13 @@ test('preserve declared ClearKey PSSH metadata and ignore invalid KIDs', async (
 
   expect(segment?.encryption?.drm.clearkey).toEqual({
     keyId: '474e7638-0000-0000-0000-41365730553d',
-    pssh: 'AAAAMHBzc2gBAAAAEHfv7MCyTQKs4zweUuL7SwAAAAFHTnY4AAAAAAAAQTZXMFU9',
+    pssh: 'AAAANHBzc2gBAAAAEHfv7MCyTQKs4zweUuL7SwAAAAFHTnY4AAAAAAAAQTZXMFU9AAAAAA==',
   });
-  expect(segment?.encryption?.psshBoxes).toHaveLength(1);
+  expect(segment?.encryption?.psshBoxes).toEqual([
+    {
+      systemId: '1077efecc0b24d02ace33c1e52e2fb4b',
+      keyIds: ['474e763800000000000041365730553d'],
+      data: new Uint8Array(),
+    },
+  ]);
 });
