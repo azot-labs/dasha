@@ -27,6 +27,22 @@ export type DashEncryptionData = {
     widevine?: { keyId?: string; pssh?: string };
     playready?: { keyId?: string; pssh?: string };
     fairplay?: { keyId?: string; pssh?: string };
+    clearkey?: { keyId?: string; pssh?: string };
+  };
+};
+
+export const createClearKeyPsshBox = (keyIds: string[]): PsshBox | undefined => {
+  const normalizedKeyIds = [
+    ...new Set(keyIds.map((keyId) => keyId.replaceAll('-', '').toLowerCase())),
+  ];
+  if (!normalizedKeyIds.length || normalizedKeyIds.some((keyId) => !/^[0-9a-f]{32}$/.test(keyId))) {
+    return undefined;
+  }
+
+  return {
+    systemId: '1077efecc0b24d02ace33c1e52e2fb4b',
+    keyIds: normalizedKeyIds,
+    data: new Uint8Array(),
   };
 };
 

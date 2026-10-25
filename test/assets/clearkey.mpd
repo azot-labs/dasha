@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" xmlns:cenc="urn:mpeg:cenc:2013" type="static" mediaPresentationDuration="PT6S" minBufferTime="PT2S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4" segmentAlignment="true">
+      <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cbcs" cenc:default_KID="474e7638-0000-0000-0000-41365730553d" />
+      <ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e" value="ClearKey1.0" />
+      <Representation id="video-main" bandwidth="1000000" codecs="avc1.420015" width="640" height="360">
+        <BaseURL>https://example.com/protected/</BaseURL>
+        <SegmentTemplate initialization="init.mp4" media="segment-$Number$.m4s" duration="2" startNumber="1" />
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
