@@ -46,6 +46,75 @@ const createDemuxer = () =>
     }),
   );
 
+test.each([1, 1000])('use integer live segment numbers with timescale %i', async (timescale) => {
+  using now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-01-01T00:01:40.376Z'));
+  const manifest = `<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic"
+  availabilityStartTime="2026-01-01T00:00:00Z" timeShiftBufferDepth="PT6S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4" contentType="video">
+      <Representation id="video-1" bandwidth="1000000" codecs="avc1.4d401f" width="640" height="360">
+        <SegmentTemplate media="video-$Number$-$Number%03d$.m4s"
+          startNumber="10" timescale="${timescale}" duration="${2 * timescale}" />
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>`;
+  using input = new Input({
+    source: new UrlSource('https://example.com/live.mpd', {
+      fetchFn: async () => new Response(manifest),
+    }),
+    formats: DASH_FORMATS,
+  });
+  const track = await input.getPrimaryVideoTrack();
+  if (!track) throw new Error('Missing DASH video track.');
+
+  const segments = await track.getSegments();
+  expect(segments.map((segment) => segment.sequenceNumber)).toEqual([57, 58, 59]);
+  expect(segments.map((segment) => segment.location.path)).toEqual([
+    'https://example.com/video-57-057.m4s',
+    'https://example.com/video-58-058.m4s',
+    'https://example.com/video-59-059.m4s',
+  ]);
+
+  const segmentedInput = track.getSegmentedInput();
+  now.mockReturnValue(Date.parse('2026-01-01T00:01:41.876Z'));
+  await segmentedInput.updateSegments();
+  expect(segmentedInput.segments.map((segment) => segment.location.path)).toEqual(
+    segments.map((segment) => segment.location.path),
+  );
+
+  now.mockReturnValue(Date.parse('2026-01-01T00:01:42.376Z'));
+  await segmentedInput.updateSegments();
+  expect(segmentedInput.segments.map((segment) => segment.sequenceNumber)).toEqual([58, 59, 60]);
+  expect(segmentedInput.segments[0]?.location.path).toBe('https://example.com/video-58-058.m4s');
+});
+
+test.each(['static', 'dynamic'])(
+  'check %s DASH liveness without fetching the manifest again',
+  async (type) => {
+    const manifest = createLiveManifest('period-a').replace('type="dynamic"', `type="${type}"`);
+    const fetchFn = vi.fn(async () => new Response(manifest));
+    using input = new Input({
+      source: new UrlSource('https://example.com/manifest.mpd', { fetchFn }),
+      formats: DASH_FORMATS,
+    });
+    const tracks = await input.getTracks();
+    expect(tracks).toHaveLength(2);
+    const initialRequestCount = fetchFn.mock.calls.length;
+    expect(initialRequestCount).toBeGreaterThan(0);
+
+    for (let index = 0; index < 3; index++) {
+      for (const track of tracks) {
+        expect(await track.isLive()).toBe(type === 'dynamic');
+        expect(await track.getLiveRefreshInterval()).toBe(type === 'dynamic' ? 15 : null);
+      }
+    }
+
+    expect(fetchFn).toHaveBeenCalledTimes(initialRequestCount);
+  },
+);
+
 test('match refreshed live tracks across period rollover without init segments', () => {
   const demuxer = createDemuxer();
   const currentTracks = demuxer.extractTracks(createLiveManifest('period-a'));

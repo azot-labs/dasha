@@ -664,7 +664,7 @@ const applyFixedDurationTemplate = (params: {
     availableTime.setUTCMilliseconds(availableTime.getUTCMilliseconds() + offsetMs);
     const elapsedSeconds = (now - availableTime.getTime()) / 1000;
     const updateWindowSeconds = parseDashDuration(timeShiftBufferDepth).total('seconds');
-    startNumber += ((elapsedSeconds - updateWindowSeconds) * timescale) / duration;
+    startNumber += Math.floor(((elapsedSeconds - updateWindowSeconds) * timescale) / duration);
     totalNumber = (updateWindowSeconds * timescale) / duration;
   }
 
