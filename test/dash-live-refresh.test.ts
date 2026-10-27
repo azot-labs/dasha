@@ -107,13 +107,72 @@ test.each(['static', 'dynamic'])(
     for (let index = 0; index < 3; index++) {
       for (const track of tracks) {
         expect(await track.isLive()).toBe(type === 'dynamic');
-        expect(await track.getLiveRefreshInterval()).toBe(type === 'dynamic' ? 15 : null);
+        expect(await track.getLiveRefreshInterval()).toBe(type === 'dynamic' ? 2 : null);
       }
     }
 
     expect(fetchFn).toHaveBeenCalledTimes(initialRequestCount);
   },
 );
+
+test.each([
+  { minimumUpdatePeriod: 'PT2S', expected: 2 },
+  { minimumUpdatePeriod: 'PT2.1S', expected: 2.1 },
+  { minimumUpdatePeriod: 'PT0S', expected: 30 },
+  { minimumUpdatePeriod: null, expected: 30 },
+])(
+  'use a live DASH refresh interval of $expected seconds for $minimumUpdatePeriod',
+  async ({ minimumUpdatePeriod, expected }) => {
+    const manifest = createLiveManifest('period-a')
+      .replace(
+        'minimumUpdatePeriod="PT2S"',
+        minimumUpdatePeriod === null ? '' : `minimumUpdatePeriod="${minimumUpdatePeriod}"`,
+      )
+      .replace('timeShiftBufferDepth="PT30S"', 'timeShiftBufferDepth="PT1M"');
+    using input = new Input({
+      source: new UrlSource('https://example.com/live.mpd', {
+        fetchFn: async () => new Response(manifest),
+      }),
+      formats: DASH_FORMATS,
+    });
+
+    const tracks = await input.getTracks();
+    for (const track of tracks) {
+      expect(await track.getLiveRefreshInterval()).toBe(expected);
+    }
+  },
+);
+
+test('refresh live DASH segments after minimumUpdatePeriod', async () => {
+  using now = vi.spyOn(performance, 'now').mockReturnValue(0);
+  let manifest = createLiveManifest('period-a').replace(
+    'timeShiftBufferDepth="PT30S"',
+    'timeShiftBufferDepth="PT1M"',
+  );
+  const fetchFn = vi.fn(async () => new Response(manifest));
+  using input = new Input({
+    source: new UrlSource('https://example.com/live.mpd', { fetchFn }),
+    formats: DASH_FORMATS,
+  });
+  const track = await input.getPrimaryVideoTrack();
+  if (!track) throw new Error('Missing DASH video track.');
+
+  const initialSegments = await track.getSegments();
+  expect(initialSegments.map((segment) => segment.timestamp)).toEqual([0, 2]);
+
+  manifest = manifest
+    .replace('<S t="0" d="2" r="1" />', '<S t="0" d="2" r="2" />')
+    .replace('minimumUpdatePeriod="PT2S"', 'minimumUpdatePeriod="PT1S"');
+  now.mockReturnValue(2000);
+  expect(track.getSegmentedInput().getRemainingWaitTimeMs()).toBe(0);
+  const requestCount = fetchFn.mock.calls.length;
+  const refreshedSegments = await track.refreshSegments();
+
+  expect(fetchFn).toHaveBeenCalledTimes(requestCount + 1);
+  expect(refreshedSegments.map((segment) => segment.timestamp)).toEqual([0, 2, 4]);
+  expect(await track.getLiveRefreshInterval()).toBe(1);
+  expect(track.getSegmentedInput().getRemainingWaitTimeMs()).toBe(1000);
+});
 
 test('match refreshed live tracks across period rollover without init segments', () => {
   const demuxer = createDemuxer();

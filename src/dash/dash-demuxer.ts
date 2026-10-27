@@ -69,6 +69,7 @@ type DashManifestInfo = {
   mpdElement: Element;
   isLive: boolean;
   availabilityStartTime: string | null;
+  minimumUpdatePeriod: string | null;
   timeShiftBufferDepth: string;
   mediaPresentationDuration: string | null;
 };
@@ -145,8 +146,19 @@ const processDashContent = (mpdContent: string) => {
   return replaceFirst(mpdContent, '<MPD ', `<MPD ${missingNamespaceDefinitions.join(' ')} `);
 };
 
-const getDashRefreshIntervalMs = (timeShiftBufferDepth: string) =>
-  parseDashDuration(timeShiftBufferDepth).total('milliseconds') / 2;
+const getDashRefreshIntervalMs = (
+  minimumUpdatePeriod: string | null,
+  timeShiftBufferDepth: string,
+) => {
+  const updatePeriodMs = minimumUpdatePeriod
+    ? parseDashDuration(minimumUpdatePeriod).total('milliseconds')
+    : 0;
+
+  // A zero update period gives no polling cadence; keep a positive fallback.
+  return updatePeriodMs > 0
+    ? updatePeriodMs
+    : parseDashDuration(timeShiftBufferDepth).total('milliseconds') / 2;
+};
 
 const getDisposition = (track: DashParsedTrack): TrackDisposition => ({
   ...DEFAULT_TRACK_DISPOSITION,
@@ -342,6 +354,7 @@ const createDashTrack = (params: {
   contentType: string | null;
   frameRate: number | undefined;
   isLive: boolean;
+  minimumUpdatePeriod: string | null;
   mimeType: string | null;
   period: Element;
   representation: Element;
@@ -352,6 +365,7 @@ const createDashTrack = (params: {
     contentType,
     frameRate,
     isLive,
+    minimumUpdatePeriod,
     mimeType,
     period,
     representation,
@@ -375,7 +389,7 @@ const createDashTrack = (params: {
     periodId: period.getAttribute('id'),
     extension: null,
     isLive,
-    refreshIntervalMs: getDashRefreshIntervalMs(timeShiftBufferDepth),
+    refreshIntervalMs: getDashRefreshIntervalMs(minimumUpdatePeriod, timeShiftBufferDepth),
     initSegment: null,
     mediaSegments: [],
   } as DashParsedTrack;
@@ -1038,6 +1052,7 @@ export class DashDemuxer {
       mpdElement,
       isLive: mpdElement.getAttribute('type') === 'dynamic',
       availabilityStartTime: mpdElement.getAttribute('availabilityStartTime'),
+      minimumUpdatePeriod: mpdElement.getAttribute('minimumUpdatePeriod'),
       timeShiftBufferDepth: mpdElement.getAttribute('timeShiftBufferDepth') || 'PT1M',
       mediaPresentationDuration: mpdElement.getAttribute('mediaPresentationDuration'),
     };
@@ -1145,6 +1160,7 @@ export class DashDemuxer {
       contentType,
       frameRate,
       isLive: manifest.isLive,
+      minimumUpdatePeriod: manifest.minimumUpdatePeriod,
       mimeType,
       period,
       representation,
