@@ -1541,6 +1541,10 @@ export class DashInputFormat extends InputFormat {
     return DASH_MIME_TYPE;
   }
 
+  get supportsTimestampedMediaData() {
+    return true;
+  }
+
   async _canReadInput(input: MediabunnyInput) {
     if (isLikelyDashPath(input.source)) return true;
 

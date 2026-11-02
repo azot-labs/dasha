@@ -2,7 +2,7 @@
   "name": "dasha",
   "version": "4.6.6",
   "description": "Streaming manifest parser",
-  "packageManager": "pnpm@12.1.0",
+  "packageManager": "pnpm@12.15.0",
   "files": [
     "dist"
   ],
@@ -61,7 +61,7 @@
     "temporal-polyfill": "^1.0.5"
   },
   "peerDependencies": {
-    "mediabunny": "^1.58.0"
+    "mediabunny": "^1.65.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.21",
