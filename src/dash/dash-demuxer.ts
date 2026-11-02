@@ -1354,8 +1354,9 @@ abstract class DashTrackBackingBase {
   }
 
   async getDurationFromMetadata(_options: DurationMetadataRequestOptions) {
+    // Mediabunny expects the end timestamp, including timeline offsets and gaps.
     return this.internalTrack.track.mediaSegments.reduce(
-      (sum, segment) => sum + segment.duration,
+      (endTimestamp, segment) => (segment.timestamp ?? endTimestamp) + segment.duration,
       0,
     );
   }
