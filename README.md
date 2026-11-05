@@ -133,7 +133,7 @@ async function getEnglishSubtitles() {
 
 ### Overriding track metadata
 
-Some services expose track metadata outside the manifest. You can override the parsed language code on any dasha track, and the updated value will be visible through the regular query/filter APIs.
+Some services expose track metadata outside the manifest. Use `setLanguageCode()` and `setName()` on any dasha track to supply it. Updated values are visible through the regular query/filter APIs. `setName(null)` clears a track's name.
 
 ```ts
 import { DASH_FORMATS, Input, UrlSource } from 'dasha';
@@ -148,6 +148,7 @@ async function getFrenchAudioTrack() {
   const apiLanguageCode = 'fr';
 
   audioTracks[0]?.setLanguageCode(apiLanguageCode);
+  audioTracks[0]?.setName('French dub');
 
   return await input.getAudioTracks({
     filter: async (track) => (await track.getLanguageCode()) === apiLanguageCode,
