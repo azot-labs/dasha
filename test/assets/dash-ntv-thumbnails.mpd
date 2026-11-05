@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--Generated with NTV packager v0.8-->
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:mpeg:dash:schema:mpd:2011 DASH-MPD.xsd" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" minBufferTime="PT2S" type="static" mediaPresentationDuration="PT2883.1201171875S">
+  <Period id="0">
+    <AdaptationSet id="0" contentType="video" maxWidth="1920" maxHeight="1080" frameRate="12800/512" subsegmentAlignment="true" par="16:9">
+      <Representation id="0" bandwidth="139330" codecs="avc1.42c01e" mimeType="video/mp4" sar="1:1" width="256" height="144">
+        <BaseURL>h264_baseline_144p_120.mp4</BaseURL>
+        <SegmentBase indexRange="828-6631" timescale="12800" presentationTimeOffset="512">
+          <Initialization range="0-827"/>
+        </SegmentBase>
+      </Representation>
+      <Representation id="2" bandwidth="665262" codecs="avc1.4d481e" mimeType="video/mp4" sar="1:1" width="640" height="360">
+        <BaseURL>h264_main_360p_600.mp4</BaseURL>
+        <SegmentBase indexRange="864-6667" timescale="12800" presentationTimeOffset="512">
+          <Initialization range="0-863"/>
+        </SegmentBase>
+      </Representation>
+      <Representation id="3" bandwidth="2143428" codecs="avc1.4d481f" mimeType="video/mp4" sar="1:1" width="1280" height="720">
+        <BaseURL>h264_main_720p_2000.mp4</BaseURL>
+        <SegmentBase indexRange="865-6668" timescale="12800" presentationTimeOffset="512">
+          <Initialization range="0-864"/>
+        </SegmentBase>
+      </Representation>
+      <Representation id="4" bandwidth="3659032" codecs="avc1.640828" mimeType="video/mp4" sar="1:1" width="1920" height="1080">
+        <BaseURL>h264_high_1080p_3200.mp4</BaseURL>
+        <SegmentBase indexRange="872-6675" timescale="12800" presentationTimeOffset="512">
+          <Initialization range="0-871"/>
+        </SegmentBase>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="1" contentType="audio" lang="en" subsegmentAlignment="true">
+      <Representation id="1" bandwidth="131405" codecs="mp4a.40.2" mimeType="audio/mp4" audioSamplingRate="48000">
+        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
+        <BaseURL>audio_128k.mp4</BaseURL>
+        <SegmentBase indexRange="823-6626" timescale="48000" presentationTimeOffset="1920">
+          <Initialization range="0-822"/>
+        </SegmentBase>
+      </Representation>
+    </AdaptationSet>
+  <AdaptationSet id="2" mimeType="image/jpeg" contentType="image">
+    <SegmentTemplate media="tile_$Number$.jpg" duration="384" startNumber="1"/>
+    <Representation bandwidth="24000" id="thumbnails_160x90" width="1280" height="720">
+      <EssentialProperty schemeIdUri="http://dashif.org/guidelines/thumbnail_tile" value="8x8"/>
+    </Representation>
+  </AdaptationSet>
+  </Period>
+</MPD>

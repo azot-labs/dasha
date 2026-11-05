@@ -1099,13 +1099,14 @@ export class DashDemuxer {
       params;
     const adaptationSetBaseUrl = extendDashBaseUrl(adaptationSet, periodBaseUrl);
     const adaptationSetFrameRate = getDashFrameRate(adaptationSet);
-    let contentType = adaptationSet.getAttribute('contentType');
-    let mimeType = adaptationSet.getAttribute('mimeType');
-
     for (const representation of getDirectDashChildren(adaptationSet, 'Representation')) {
+      const contentType =
+        representation.getAttribute('contentType') ?? adaptationSet.getAttribute('contentType');
+      const mimeType =
+        representation.getAttribute('mimeType') ?? adaptationSet.getAttribute('mimeType');
+      if (contentType === 'image' || mimeType?.startsWith('image/')) continue;
+
       const segmentBaseUrl = extendDashBaseUrl(representation, adaptationSetBaseUrl);
-      contentType ||= representation.getAttribute('contentType');
-      mimeType ||= representation.getAttribute('mimeType');
       const bitrate = Number(representation.getAttribute('bandwidth') ?? '');
       const track = this.createTrack({
         adaptationSet,

@@ -1,6 +1,32 @@
 import { expect, test } from 'vitest';
-import { DASH_FORMATS } from '../src';
-import { createAssetInput } from './utils';
+import { DASH_FORMATS, Input, UrlSource } from '../src';
+import { createAssetInput, loadAssetSync } from './utils';
+
+test.each([
+  ['adaptation set content type', 'contentType="image"', ''],
+  ['adaptation set MIME type', 'mimeType="image/jpeg"', ''],
+  ['representation content type', '', 'contentType="image"'],
+  ['representation MIME type', '', 'mimeType="image/jpeg"'],
+])(
+  'ignores DASH thumbnails identified by %s',
+  async (_name, adaptationAttrs, representationAttrs) => {
+    const manifest = loadAssetSync('dash-ntv-thumbnails.mpd')
+      .replace('mimeType="image/jpeg" contentType="image"', adaptationAttrs)
+      .replace('id="thumbnails_160x90"', `id="thumbnails_160x90" ${representationAttrs}`);
+    using input = new Input({
+      source: new UrlSource('https://example.com/ntv/h264.mpd', {
+        fetchFn: async () => new Response(manifest),
+      }),
+      formats: DASH_FORMATS,
+    });
+
+    expect(await input.getTracks()).toHaveLength(5);
+    expect(await input.getVideoTracks()).toHaveLength(4);
+    expect(await input.getAudioTracks()).toHaveLength(1);
+    expect(await input.getSubtitleTracks()).toHaveLength(0);
+    expect(await (await input.getPrimaryVideoTrack())?.getDisplayHeight()).toBe(1080);
+  },
+);
 
 test('preserve dash track metadata across video, audio, and subtitles', async () => {
   using input = createAssetInput('axinom-2.mpd', DASH_FORMATS);
