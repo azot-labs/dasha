@@ -58,10 +58,16 @@ interface TrackOriginMethods {
   /**
    * The track in the input it comes from. For a track of a merged input (see `Input.merge`), the track of the
    * input it was merged from, with its original ID; otherwise the track itself. Typed as any track
-   * kind, so narrowing with `isAudioTrack()` or `isVideoTrack()` still yields dasha's track types.
+   * kind; narrow it with `isAudioTrack()` or `isVideoTrack()`.
    */
   readonly origin: InputTrack;
 }
+
+// Listed first in each track type so these guards win over mediabunny's, which narrow to its own track types.
+type TrackKindGuards = {
+  isVideoTrack(): this is InputVideoTrack;
+  isAudioTrack(): this is InputAudioTrack;
+};
 
 type VideoDynamicRangeMethods = {
   getDynamicRange(): Promise<VideoDynamicRange>;
@@ -71,23 +77,27 @@ type MediabunnySubtitleTrackLike = MediabunnyInputTrack & {
   type: 'subtitle';
 };
 
-export type InputTrack = MediabunnyInputTrack &
+export type InputTrack = TrackKindGuards &
+  MediabunnyInputTrack &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
   TrackOriginMethods;
-export type InputVideoTrack = MediabunnyInputVideoTrack &
+export type InputVideoTrack = TrackKindGuards &
+  MediabunnyInputVideoTrack &
   SegmentAccessMethods &
   VideoDynamicRangeMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
   TrackOriginMethods;
-export type InputAudioTrack = MediabunnyInputAudioTrack &
+export type InputAudioTrack = TrackKindGuards &
+  MediabunnyInputAudioTrack &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
   TrackOriginMethods;
-export type InputSubtitleTrack = MediabunnySubtitleTrackLike &
+export type InputSubtitleTrack = TrackKindGuards &
+  MediabunnySubtitleTrackLike &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
@@ -830,13 +840,7 @@ const setTrackName = (track: MediabunnyInputTrack, value: string | null) => {
 const getTrackOrigin = (track: MediabunnyInputTrack) =>
   (getTrackBacking(track) as { [ORIGIN_TRACK]?: InputTrack })[ORIGIN_TRACK];
 
-const addSegmentAccess = <T extends MediabunnyInputTrack>(
-  track: T,
-): T &
-  SegmentAccessMethods &
-  TrackMetadataOverrideMethods &
-  TrackSourceMethods &
-  TrackOriginMethods =>
+const addSegmentAccess = (track: MediabunnyInputTrack): InputTrack =>
   new Proxy(track, {
     get(target, prop, receiver) {
       if (prop === 'source') {
@@ -886,11 +890,7 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(
       const value = Reflect.get(target, prop, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
-  }) as T &
-    SegmentAccessMethods &
-    TrackMetadataOverrideMethods &
-    TrackSourceMethods &
-    TrackOriginMethods;
+  }) as InputTrack;
 
 /**
  * The backing of `origin` for a merged input: the same media under the merged input's ID, number and pairing
