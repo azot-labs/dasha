@@ -62,6 +62,12 @@ test('merge pairs tracks of different inputs and keeps the pairing of each input
     expect(video.canBePairedWith(mergedUnpairedAudio)).toBe(true);
     expect(video.canBePairedWith(firstAudio)).toBe(true);
   }
+  for (const track of [...videos, ...audios]) {
+    for (const other of [...videos, ...audios]) {
+      if (track === other || track.origin.input !== other.origin.input) continue;
+      expect(track.canBePairedWith(other)).toBe(track.origin.canBePairedWith(other.origin));
+    }
+  }
 });
 
 test('changes to tracks of a merged input stay off the tracks it merged', async () => {

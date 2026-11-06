@@ -166,7 +166,6 @@ const TRACK_METADATA_OVERRIDES = Symbol.for('dasha.track-metadata-overrides');
 const ORIGINAL_GET_LANGUAGE_CODE = Symbol.for('dasha.original-get-language-code');
 const ORIGINAL_GET_NAME = Symbol.for('dasha.original-get-name');
 const ORIGIN_TRACK = Symbol.for('dasha.origin-track');
-const MERGED_TRACK_TYPES = ['video', 'audio', 'subtitle'] as const;
 const MERGED_INPUT_HAS_NO_ROOT =
   'A merged input has no source or format of its own; read them from its tracks (track.source, track.origin.input).';
 const HLS_VARIANT_INF_LINE = '#EXT-X-STREAM-INF:';
@@ -928,8 +927,8 @@ const createMergedTrackBacking = (
 
 /**
  * Pairing masks for the tracks of merged inputs. Tracks of one input keep that input's pairing, on bits no other
- * input uses. Tracks of different inputs pair with each other, as merged inputs share a timeline: for every two
- * inputs and two track types, one bit marks the first type in the first input and the second type in the second.
+ * input uses. Tracks of different types in different inputs pair with each other, as merged inputs share a
+ * timeline: each such pair gets a bit of its own, so no two tracks of one input gain a shared bit.
  */
 const mergePairingMasks = (tracksByInput: readonly InputTrack[][]) => {
   const masks = new Map<InputTrack, bigint>();
@@ -953,22 +952,19 @@ const mergePairingMasks = (tracksByInput: readonly InputTrack[][]) => {
     }
   }
 
-  const addBit = (tracks: InputTrack[], type: string, bit: bigint) => {
-    for (const track of tracks) {
-      if (track.type === type) masks.set(track, (masks.get(track) ?? 0n) | bit);
-    }
-  };
+  const addBit = (track: InputTrack, bit: bigint) =>
+    masks.set(track, (masks.get(track) ?? 0n) | bit);
   tracksByInput.forEach((first, firstIndex) => {
-    tracksByInput.forEach((second, secondIndex) => {
-      if (firstIndex === secondIndex) return;
-      MERGED_TRACK_TYPES.forEach((firstType, typeIndex) => {
-        for (const secondType of MERGED_TRACK_TYPES.slice(typeIndex + 1)) {
+    for (const second of tracksByInput.slice(firstIndex + 1)) {
+      for (const firstTrack of first) {
+        for (const secondTrack of second) {
+          if (firstTrack.type === secondTrack.type) continue;
           const bit = allocateBit();
-          addBit(first, firstType, bit);
-          addBit(second, secondType, bit);
+          addBit(firstTrack, bit);
+          addBit(secondTrack, bit);
         }
-      });
-    });
+      }
+    }
   });
 
   return masks;
