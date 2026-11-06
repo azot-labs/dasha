@@ -131,6 +131,33 @@ async function getEnglishSubtitles() {
 }
 ```
 
+### Merging inputs
+
+Some services split one video across several manifests or files, such as one manifest per codec or quality. `Input.merge()` lists their tracks as one input, so they can be queried, paired and selected together. Manifests and direct files can be mixed.
+
+```ts
+import { DASH_FORMATS, Input, UrlSource } from 'dasha';
+
+async function getAllVideoTracks() {
+  using input = Input.merge([
+    new Input({ source: new UrlSource('https://example.com/hevc.mpd'), formats: DASH_FORMATS }),
+    new Input({ source: new UrlSource('https://example.com/avc.mpd'), formats: DASH_FORMATS }),
+  ]);
+
+  const videoTracks = await input.getVideoTracks();
+  for (const track of videoTracks) {
+    // track.origin is the same track in the manifest it came from, with its original ID.
+    console.log(track.id, track.origin.input.source, await track.getCodec());
+  }
+  return videoTracks;
+}
+```
+
+- Tracks of different inputs pair with each other, as the inputs are assumed to share a timeline. Tracks of one input keep that input's pairing.
+- Track IDs count up from 1 in input order. `track.origin` is the track in its own input, with its original ID.
+- A merged input has no source or format of its own: read `track.source` or `track.origin.input` instead.
+- The merged input owns the inputs it merges and disposes them with itself.
+
 ### Overriding track metadata
 
 Some services expose track metadata outside the manifest. Use `setLanguageCode()` and `setName()` on any dasha track to supply it. Updated values are visible through the regular query/filter APIs. `setName(null)` clears a track's name.
