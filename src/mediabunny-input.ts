@@ -54,12 +54,13 @@ type TrackSourceMethods = {
   readonly source: Source;
 };
 
-interface TrackOriginMethods<T> {
+interface TrackOriginMethods {
   /**
    * The track in the input it comes from. For a track of a merged input (see `Input.merge`), the track of the
-   * input it was merged from, with its original ID; otherwise the track itself.
+   * input it was merged from, with its original ID; otherwise the track itself. Typed as any track
+   * kind, so narrowing with `isAudioTrack()` or `isVideoTrack()` still yields dasha's track types.
    */
-  readonly origin: T;
+  readonly origin: InputTrack;
 }
 
 type VideoDynamicRangeMethods = {
@@ -74,23 +75,23 @@ export type InputTrack = MediabunnyInputTrack &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
-  TrackOriginMethods<InputTrack>;
+  TrackOriginMethods;
 export type InputVideoTrack = MediabunnyInputVideoTrack &
   SegmentAccessMethods &
   VideoDynamicRangeMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
-  TrackOriginMethods<InputVideoTrack>;
+  TrackOriginMethods;
 export type InputAudioTrack = MediabunnyInputAudioTrack &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
-  TrackOriginMethods<InputAudioTrack>;
+  TrackOriginMethods;
 export type InputSubtitleTrack = MediabunnySubtitleTrackLike &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
-  TrackOriginMethods<InputSubtitleTrack>;
+  TrackOriginMethods;
 
 export type InputSubtitleSource = PathedSource | SourceRef<PathedSource>;
 export type InputSubtitleTrackMetadata = {
@@ -835,7 +836,7 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
   TrackSourceMethods &
-  TrackOriginMethods<InputTrack> =>
+  TrackOriginMethods =>
   new Proxy(track, {
     get(target, prop, receiver) {
       if (prop === 'source') {
@@ -889,7 +890,7 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(
     SegmentAccessMethods &
     TrackMetadataOverrideMethods &
     TrackSourceMethods &
-    TrackOriginMethods<InputTrack>;
+    TrackOriginMethods;
 
 /**
  * The backing of `origin` for a merged input: the same media under the merged input's ID, number and pairing
