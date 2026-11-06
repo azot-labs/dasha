@@ -1022,6 +1022,10 @@ export class ExternalSubtitleTrackBacking {
     return this.#pairingMask;
   }
 
+  getSource() {
+    return this.#source;
+  }
+
   getBitrate() {
     return null;
   }

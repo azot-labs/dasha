@@ -1,6 +1,7 @@
 import {
   HLS,
   ALL_FORMATS as ALL_MEDIABUNNY_FORMATS,
+  BufferSource,
   Input as MediabunnyInput,
   InputTrack as MediabunnyInputTrack,
   InputVideoTrack as MediabunnyInputVideoTrackClass,
@@ -14,6 +15,7 @@ import {
   type PathedSource,
   type TrackDisposition,
   type InputVideoTrack as MediabunnyInputVideoTrack,
+  type InputOptions as MediabunnyInputOptions,
   type Source,
 } from 'mediabunny';
 import type { HlsSegment, HlsSegmentedInput, InputTrackWithBacking } from './mediabunny';
@@ -52,6 +54,14 @@ type TrackSourceMethods = {
   readonly source: Source;
 };
 
+interface TrackOriginMethods<T> {
+  /**
+   * The track in the input it comes from. For a track of a merged input (see `Input.merge`), the track of the
+   * input it was merged from, with its original ID; otherwise the track itself.
+   */
+  readonly origin: T;
+}
+
 type VideoDynamicRangeMethods = {
   getDynamicRange(): Promise<VideoDynamicRange>;
 };
@@ -63,20 +73,24 @@ type MediabunnySubtitleTrackLike = MediabunnyInputTrack & {
 export type InputTrack = MediabunnyInputTrack &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
-  TrackSourceMethods;
+  TrackSourceMethods &
+  TrackOriginMethods<InputTrack>;
 export type InputVideoTrack = MediabunnyInputVideoTrack &
   SegmentAccessMethods &
   VideoDynamicRangeMethods &
   TrackMetadataOverrideMethods &
-  TrackSourceMethods;
+  TrackSourceMethods &
+  TrackOriginMethods<InputVideoTrack>;
 export type InputAudioTrack = MediabunnyInputAudioTrack &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
-  TrackSourceMethods;
+  TrackSourceMethods &
+  TrackOriginMethods<InputAudioTrack>;
 export type InputSubtitleTrack = MediabunnySubtitleTrackLike &
   SegmentAccessMethods &
   TrackMetadataOverrideMethods &
-  TrackSourceMethods;
+  TrackSourceMethods &
+  TrackOriginMethods<InputSubtitleTrack>;
 
 export type InputSubtitleSource = PathedSource | SourceRef<PathedSource>;
 export type InputSubtitleTrackMetadata = {
@@ -151,6 +165,9 @@ const ORIGINAL_GET_PAIRING_MASK = Symbol.for('dasha.original-get-pairing-mask');
 const TRACK_METADATA_OVERRIDES = Symbol.for('dasha.track-metadata-overrides');
 const ORIGINAL_GET_LANGUAGE_CODE = Symbol.for('dasha.original-get-language-code');
 const ORIGINAL_GET_NAME = Symbol.for('dasha.original-get-name');
+const ORIGIN_TRACK = Symbol.for('dasha.origin-track');
+const MERGED_INPUT_HAS_NO_ROOT =
+  'A merged input has no source or format of its own; read them from its tracks (track.source, track.origin.input).';
 const HLS_VARIANT_INF_LINE = '#EXT-X-STREAM-INF:';
 const HLS_DEMUXER_PATCHED = Symbol.for('dasha.hls-demuxer-patched');
 const HLS_DEMUXER_METADATA_PATCH = Symbol.for('dasha.hls-demuxer-metadata-patch');
@@ -809,13 +826,24 @@ const setTrackName = (track: MediabunnyInputTrack, value: string | null) => {
   ).name = value;
 };
 
+const getTrackOrigin = (track: MediabunnyInputTrack) =>
+  (getTrackBacking(track) as { [ORIGIN_TRACK]?: InputTrack })[ORIGIN_TRACK];
+
 const addSegmentAccess = <T extends MediabunnyInputTrack>(
   track: T,
-): T & SegmentAccessMethods & TrackMetadataOverrideMethods & TrackSourceMethods =>
+): T &
+  SegmentAccessMethods &
+  TrackMetadataOverrideMethods &
+  TrackSourceMethods &
+  TrackOriginMethods<InputTrack> =>
   new Proxy(track, {
-    get(target, prop) {
+    get(target, prop, receiver) {
       if (prop === 'source') {
         return getTrackSource(target);
+      }
+
+      if (prop === 'origin') {
+        return getTrackOrigin(target) ?? receiver;
       }
 
       if (prop === 'getDynamicRange' && target instanceof MediabunnyInputVideoTrackClass) {
@@ -857,7 +885,109 @@ const addSegmentAccess = <T extends MediabunnyInputTrack>(
       const value = Reflect.get(target, prop, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
-  }) as T & SegmentAccessMethods & TrackMetadataOverrideMethods & TrackSourceMethods;
+  }) as T &
+    SegmentAccessMethods &
+    TrackMetadataOverrideMethods &
+    TrackSourceMethods &
+    TrackOriginMethods<InputTrack>;
+
+/**
+ * The backing of `origin` for a merged input: the same media under the merged input's ID, number and pairing
+ * mask. Methods stay bound to the origin's backing, whose private state they read. Patches the merged
+ * input applies (pairing, metadata overrides) land on this backing alone, and the origin's own patches, kept under
+ * symbols, stay with the origin.
+ */
+const createMergedTrackBacking = (
+  origin: InputTrack,
+  merged: { id: number; number: number; pairingMask: bigint },
+) => {
+  const own: Record<PropertyKey, unknown> = {
+    getId: () => merged.id,
+    getNumber: () => merged.number,
+    getPairingMask: () => merged.pairingMask,
+    getSource: () => origin.source,
+    [ORIGIN_TRACK]: origin.origin,
+  };
+  return new Proxy(getTrackBacking(origin) as TrackBacking, {
+    get(target, prop) {
+      if (Object.hasOwn(own, prop)) return own[prop];
+      if (typeof prop === 'symbol') return undefined;
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    set(_target, prop, value) {
+      own[prop] = value;
+      return true;
+    },
+    has(target, prop) {
+      return Object.hasOwn(own, prop) || (typeof prop === 'string' && Reflect.has(target, prop));
+    },
+  });
+};
+
+/**
+ * Pairing masks for the tracks of merged inputs. Tracks of one input keep that input's pairing, on bits no other
+ * input uses. Tracks of different types in different inputs pair with each other, as merged inputs share a
+ * timeline: each such pair gets a bit of its own, so no two tracks of one input gain a shared bit.
+ */
+const mergePairingMasks = (tracksByInput: readonly InputTrack[][]) => {
+  const masks = new Map<InputTrack, bigint>();
+  let nextBitIndex = 0n;
+  const allocateBit = () => 1n << nextBitIndex++;
+
+  for (const tracks of tracksByInput) {
+    const bits = new Map<number, bigint>();
+    for (const track of tracks) {
+      let mask = 0n;
+      const originalMask = (getTrackBacking(track) as SegmentableBacking).getPairingMask?.() ?? 0n;
+      for (const index of getPairingMaskIndexes(originalMask)) {
+        let bit = bits.get(index);
+        if (bit === undefined) {
+          bit = allocateBit();
+          bits.set(index, bit);
+        }
+        mask |= bit;
+      }
+      masks.set(track, mask);
+    }
+  }
+
+  const addBit = (track: InputTrack, bit: bigint) =>
+    masks.set(track, (masks.get(track) ?? 0n) | bit);
+  tracksByInput.forEach((first, firstIndex) => {
+    for (const second of tracksByInput.slice(firstIndex + 1)) {
+      for (const firstTrack of first) {
+        for (const secondTrack of second) {
+          if (firstTrack.type === secondTrack.type) continue;
+          const bit = allocateBit();
+          addBit(firstTrack, bit);
+          addBit(secondTrack, bit);
+        }
+      }
+    }
+  });
+
+  return masks;
+};
+
+/**
+ * Backings for every track of `inputs`, in input order. IDs count up from 1 across all of them and numbers count
+ * up per track type, so both stay unique within the merged input and repeat for the same inputs.
+ */
+const mergeTrackBackings = async (inputs: readonly SegmentedMediabunnyInput[]) => {
+  const tracksByInput = await Promise.all(inputs.map((input) => input.getTracks()));
+  const masks = mergePairingMasks(tracksByInput);
+  const numbers = new Map<string, number>();
+  return tracksByInput.flat().map((track, index) => {
+    const number = (numbers.get(track.type) ?? 0) + 1;
+    numbers.set(track.type, number);
+    return createMergedTrackBacking(track, {
+      id: index + 1,
+      number,
+      pairingMask: masks.get(track) ?? 0n,
+    });
+  });
+};
 
 class MediabunnyInputSubtitleTrack extends MediabunnyInputTrack {
   #backing: SegmentableBacking;
@@ -919,6 +1049,78 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
   #nextCustomAudioTrackId = CUSTOM_AUDIO_TRACK_ID_OFFSET;
   #nextCustomAudioTrackNumber = CUSTOM_AUDIO_TRACK_ID_OFFSET;
   #nextPairingBitIndex: bigint | null = null;
+  #mergedInputs: readonly SegmentedMediabunnyInput[] | null = null;
+  #mergedBackingsPromise: Promise<TrackBacking[]> | null = null;
+
+  /**
+   * One input over the tracks of several, for media a service splits across manifests or files, such as one per
+   * codec or quality. Inputs may mix manifests and direct files.
+   *
+   * Tracks of one input keep that input's pairing; tracks of different inputs pair with each other, as the inputs
+   * are assumed to share a timeline. Track IDs count up from 1 in input order; `track.origin` is the track in its
+   * own input. The merged input has no source or format of its own: read them per track.
+   *
+   * The merged input owns `inputs` and disposes them with itself. Do not use or change them after merging.
+   */
+  static merge<T extends SegmentedMediabunnyInput>(
+    this: new (options: MediabunnyInputOptions) => T,
+    inputs: readonly SegmentedMediabunnyInput[],
+  ): T {
+    if (!Array.isArray(inputs) || inputs.length === 0) {
+      throw new TypeError('inputs must be a non-empty array.');
+    }
+    for (const input of inputs) {
+      if (!(input instanceof SegmentedMediabunnyInput)) {
+        throw new TypeError('inputs must be dasha inputs.');
+      }
+      if (input.disposed) {
+        throw new TypeError('inputs must not be disposed.');
+      }
+    }
+    if (new Set(inputs).size !== inputs.length) {
+      throw new TypeError('inputs must not repeat an input.');
+    }
+
+    const merged = new this({ source: new BufferSource(new Uint8Array(0)), formats: [] });
+    (merged as SegmentedMediabunnyInput).#mergedInputs = [...inputs];
+    return merged;
+  }
+
+  override get source(): S {
+    if (this.#mergedInputs) {
+      throw new Error(MERGED_INPUT_HAS_NO_ROOT);
+    }
+    return super.source;
+  }
+
+  override _getDemuxer() {
+    if (this.#mergedInputs) {
+      return Promise.reject(new Error(MERGED_INPUT_HAS_NO_ROOT));
+    }
+    return super._getDemuxer();
+  }
+
+  override _getTrackBackings() {
+    const inputs = this.#mergedInputs;
+    if (!inputs) {
+      return super._getTrackBackings();
+    }
+
+    if (!this.#mergedBackingsPromise) {
+      const promise = mergeTrackBackings(inputs).then((backings) => {
+        // Read when allocating pairing bits for tracks added to the merged input.
+        (this as unknown as { _trackBackingsCache: TrackBacking[] })._trackBackingsCache = backings;
+        return backings;
+      });
+      promise.catch(() => {
+        if (this.#mergedBackingsPromise === promise) {
+          this.#mergedBackingsPromise = null;
+        }
+      });
+      this.#mergedBackingsPromise = promise;
+    }
+    return this.#mergedBackingsPromise;
+  }
 
   async #queryTracks<T extends MediabunnyInputTrack>(
     query: InputTrackQuery<T> | undefined,
@@ -959,7 +1161,8 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
       return audioBackings;
     }
 
-    if ((await this.getFormat()) !== HLS) {
+    // Merged inputs already list the HLS subtitles of the inputs they merge.
+    if (this.#mergedInputs || (await this.getFormat()) !== HLS) {
       return [...audioBackings, ...backings];
     }
 
@@ -1229,7 +1432,7 @@ export class SegmentedMediabunnyInput<S extends Source = Source> extends Mediabu
     }
 
     super.dispose();
-    for (const input of this.#audioInputs) {
+    for (const input of [...this.#audioInputs, ...(this.#mergedInputs ?? [])]) {
       input.dispose();
     }
     this.#audioInputs.length = 0;
