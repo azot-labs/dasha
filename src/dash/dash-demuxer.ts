@@ -342,11 +342,20 @@ const getRoleType = (roleValue: string) => {
   return ROLE_TYPE[roleTypeKey as keyof typeof ROLE_TYPE];
 };
 
-const getDashTrackName = (representation: Element, adaptationSet: Element) =>
-  representation.getAttribute('label') ||
-  representation.getAttribute('bitmovin:label') ||
-  adaptationSet.getAttribute('label') ||
-  adaptationSet.getAttribute('bitmovin:label');
+const getDashTrackName = (representation: Element, adaptationSet: Element) => {
+  for (const element of [representation, adaptationSet]) {
+    for (const label of element.getElementsByTagNameNS('*', 'Label')) {
+      if (!label.parentNode?.isSameNode(element) || label.namespaceURI !== element.namespaceURI)
+        continue;
+      const name = label.textContent?.trim();
+      if (name) return name;
+    }
+    const name =
+      element.getAttribute('label')?.trim() || element.getAttribute('bitmovin:label')?.trim();
+    if (name) return name;
+  }
+  return null;
+};
 
 const createDashTrack = (params: {
   adaptationSet: Element;

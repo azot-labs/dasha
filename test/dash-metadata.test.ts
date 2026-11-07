@@ -111,3 +111,59 @@ test('keeps separate DASH audio adaptation sets pairable with video', async () =
     ]),
   );
 });
+
+test.each([
+  ['<Label> Русский (сгенерировано ИИ) </Label>', '', '', '', 'Русский (сгенерировано ИИ)'],
+  [
+    '<Label>Parent</Label>',
+    '<Label>Representation &amp; commentary</Label>',
+    '',
+    '',
+    'Representation & commentary',
+  ],
+  ['<Label>Parent</Label>', '<Label>  </Label>', '', '', 'Parent'],
+  ['<Label>   </Label><Label>Second label</Label>', '', '', '', 'Second label'],
+  [
+    '<dash:Label xmlns:dash="urn:mpeg:dash:schema:mpd:2011">Namespaced</dash:Label>',
+    '',
+    '',
+    '',
+    'Namespaced',
+  ],
+  ['<Label>Standard</Label>', '', 'label="Legacy"', '', 'Standard'],
+  ['<Label>Parent</Label>', '', '', 'label="Representation"', 'Representation'],
+  ['', '', 'label="Legacy"', '', 'Legacy'],
+  ['', '', 'bitmovin:label="Bitmovin"', '', 'Bitmovin'],
+  ['', '', '', '', null],
+])(
+  'reads DASH track names from labels and legacy attributes: %s %s %s %s',
+  async (
+    adaptationLabel,
+    representationLabel,
+    adaptationAttributes,
+    representationAttributes,
+    expected,
+  ) => {
+    const manifest = `<?xml version="1.0"?>
+    <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" xmlns:bitmovin="urn:bitmovin" type="static" mediaPresentationDuration="PT10S" minBufferTime="PT1S">
+      <Period duration="PT10S">
+        <AdaptationSet contentType="text" mimeType="text/vtt" lang="rus" ${adaptationAttributes}>
+          ${adaptationLabel}
+          <Representation id="301" bandwidth="1301" ${representationAttributes}>
+            ${representationLabel}
+            <BaseURL>subtitle301</BaseURL>
+          </Representation>
+        </AdaptationSet>
+      </Period>
+    </MPD>`;
+    using input = new Input({
+      source: new UrlSource('https://example.com/Manifest.mpd', {
+        fetchFn: async () => new Response(manifest),
+      }),
+      formats: DASH_FORMATS,
+    });
+    const tracks = await input.getSubtitleTracks();
+    expect(tracks).toHaveLength(1);
+    expect(await tracks[0].getName()).toBe(expected);
+  },
+);
