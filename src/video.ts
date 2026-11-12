@@ -132,10 +132,19 @@ const getCicpValues = (
       .filter((prop) => prop.schemeIdUri === schemeIdUri)
       .flatMap((prop) => (prop.value ? [Number.parseInt(prop.value, 10)] : []));
 
+  const primaries = getValues(primariesScheme)[0];
+  const transfer = getValues(transferScheme)[0];
+  const matrix = getValues(matrixScheme)[0];
+
+  // Unrelated descriptors, such as quality labels, must not suppress media metadata.
+  if (primaries === undefined && transfer === undefined && matrix === undefined) {
+    return undefined;
+  }
+
   return {
-    primaries: getValues(primariesScheme)[0] ?? 0,
-    transfer: getValues(transferScheme)[0] ?? 0,
-    matrix: getValues(matrixScheme)[0] ?? 0,
+    primaries: primaries ?? 0,
+    transfer: transfer ?? 0,
+    matrix: matrix ?? 0,
   };
 };
 
@@ -143,7 +152,9 @@ export const parseColorSpace = (
   supplementalProps: CicpProperty[] = [],
   essentialProps: CicpProperty[] = [],
 ) => {
-  const { primaries, transfer, matrix } = getCicpValues(supplementalProps, essentialProps);
+  const cicp = getCicpValues(supplementalProps, essentialProps);
+  if (!cicp) return undefined;
+  const { primaries, transfer, matrix } = cicp;
   return parseColorSpaceFromCicp(primaries, transfer, matrix);
 };
 
@@ -230,9 +241,11 @@ export const parseDynamicRange = (
   codecs: string,
   supplementalProps: CicpProperty[] = [],
   essentialProps: CicpProperty[] = [],
-): VideoDynamicRange => {
+): VideoDynamicRange | undefined => {
   const codecDynamicRange = parseDynamicRangeFromCodecString(codecs);
   if (codecDynamicRange) return codecDynamicRange;
-  const { primaries, transfer, matrix } = getCicpValues(supplementalProps, essentialProps);
+  const cicp = getCicpValues(supplementalProps, essentialProps);
+  if (!cicp) return undefined;
+  const { primaries, transfer, matrix } = cicp;
   return parseDynamicRangeFromCicp(primaries, transfer, matrix);
 };
