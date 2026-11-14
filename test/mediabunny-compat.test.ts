@@ -1,5 +1,9 @@
 import {
+  BufferTarget,
   Conversion,
+  EncodedAudioPacketSource,
+  EncodedPacket,
+  EncodedVideoPacketSource,
   Input as MediabunnyInput,
   Mp4OutputFormat,
   NullTarget,
@@ -41,12 +45,49 @@ test('preserveSubtitleBackingsOnInput opts internal inputs out of subtitle filte
 });
 
 test('conversion track selection ignores DASH subtitles on plain mediabunny Input', async () => {
+  const media = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
+  const video = new EncodedVideoPacketSource('vp9');
+  const audio = new EncodedAudioPacketSource('opus');
+  media.addVideoTrack(video);
+  media.addAudioTrack(audio);
+  await media.start();
+  await video.add(new EncodedPacket(new Uint8Array(16), 'key', 0, 1), {
+    decoderConfig: { codec: 'vp09.00.10.08', codedWidth: 640, codedHeight: 360 },
+  });
+  await audio.add(new EncodedPacket(new Uint8Array([0xf8, 0xff, 0xfe]), 'key', 0, 0.02), {
+    decoderConfig: { codec: 'opus', numberOfChannels: 2, sampleRate: 48000 },
+  });
+  await media.finalize();
+
+  // Conversion.init reads packets, so keep both the manifest and its media local.
+  const manifest = `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT1S">
+    <Period duration="PT1S">
+      <AdaptationSet contentType="video" mimeType="video/mp4" codecs="vp09.00.10.08">
+        <Representation id="video" bandwidth="1000000" width="640" height="360">
+          <BaseURL>media.mp4</BaseURL>
+        </Representation>
+      </AdaptationSet>
+      <AdaptationSet contentType="audio" mimeType="audio/mp4" codecs="opus" lang="en">
+        <Representation id="audio" bandwidth="64000" audioSamplingRate="48000">
+          <BaseURL>media.mp4</BaseURL>
+        </Representation>
+      </AdaptationSet>
+      <AdaptationSet contentType="text" mimeType="text/vtt" lang="ru">
+        <Representation id="subtitles" bandwidth="100">
+          <BaseURL>subtitles.vtt</BaseURL>
+        </Representation>
+      </AdaptationSet>
+    </Period>
+  </MPD>`;
   using input = new MediabunnyInput({
-    source: new UrlSource(assetFileUrl('axinom-2.mpd')),
+    source: new UrlSource('https://media.test/manifest.mpd', {
+      fetchFn: async (url) => {
+        if (String(url).endsWith('/manifest.mpd')) return new Response(manifest);
+        if (String(url).endsWith('/media.mp4')) return new Response(media.target.buffer!);
+        throw new Error(`Unexpected media request: ${url}`);
+      },
+    }),
     formats: DASH_FORMATS,
-    // Conversion.init probes sample data since mediabunny 1.56, which requires a key resolver on
-    // encrypted content; a dummy key is enough for track selection validation without execution.
-    formatOptions: { isobmff: { resolveKeyId: () => '0'.repeat(32) } },
   });
 
   const selectedVideo = await input.getPrimaryVideoTrack();
