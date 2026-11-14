@@ -1555,14 +1555,14 @@ export class DashInputFormat extends InputFormat {
     return true;
   }
 
-  async _canReadInput(input: MediabunnyInput) {
-    if (isLikelyDashPath(input.source)) return true;
+  async _getMatchPosition(input: MediabunnyInput) {
+    if (isLikelyDashPath(input.source)) return 0;
 
     try {
       const { text } = await loadDashManifest(input.source);
-      return isDashManifestText(text);
+      return isDashManifestText(text) ? 0 : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
