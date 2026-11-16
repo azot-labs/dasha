@@ -843,6 +843,12 @@ const getTrackOrigin = (track: MediabunnyInputTrack) =>
 const addSegmentAccess = (track: MediabunnyInputTrack): InputTrack =>
   new Proxy(track, {
     get(target, prop, receiver) {
+      if (prop === 'id') {
+        // Dasha assigns IDs to backings outside Mediabunny's native track cache.
+        const backing = getTrackBacking(target);
+        if ('getId' in backing) return backing.getId();
+      }
+
       if (prop === 'source') {
         return getTrackSource(target);
       }
